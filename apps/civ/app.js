@@ -7,7 +7,7 @@ import {
   relKey, atWar, declareWar, offerPeace, strengthOf, offerTechTrade,
   RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
-  unitAvailable, resourceConnected, hasMarble, wonderCost,
+  unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -90,6 +90,7 @@ function buildViewModel() {
     .map((c) => ({
       id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner,
       walls: c.buildings.includes("walls"), religion: c.religion || null,
+      happy: c.happy ?? 1, unhappy: c.unhappy ?? 0, riot: !!c.riot,
       wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
     }));
   const units = S.units
@@ -155,6 +156,8 @@ function renderTopbar() {
   const gold = playerGoldPerTurn(0);
   const goldStrike = p.gold === 0 && gold.net < 0;
   const netStr = `${gold.net >= 0 ? "+" : ""}${gold.net}`;
+  const happinessTotal = S.cities.filter((c) => c.owner === 0)
+    .reduce((a, c) => a + (c.happy ?? 1) - (c.unhappy ?? 0), 0);
   const el = document.getElementById("civ-top");
   if (!el) return;
   el.innerHTML = `
@@ -167,6 +170,7 @@ function renderTopbar() {
       </div>
       <div class="civ-sci civ-gold" title="Золото: доход ${gold.income}🪙 − содержание ${gold.upkeep}🪙 = ${netStr}🪙 за ход">🪙 ${p.gold} (${netStr})${goldStrike ? ` <span class="civ-warn">⚠ наука остановлена</span>` : ""}</div>
       <div class="civ-cult" title="Легендарные города: ${legendaryCities(0).length} из ${CULTURE_WIN_CITIES}">🏛 ${legendaryCities(0).length}/${CULTURE_WIN_CITIES}</div>
+      <div class="civ-cult" title="Суммарное счастье городов: счастье − недовольство">😊 ${happinessTotal >= 0 ? "+" : ""}${happinessTotal}</div>
     </div>
     <div class="topbar-row topbar-actions">
       <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
@@ -334,6 +338,14 @@ function showCity(c) {
   closeModal();
   const S = getState();
   const y = cityYields(c);
+  const hap = cityHappiness(c);
+  const mood = c.riot
+    ? "😡 бунт!"
+    : hap.happy > hap.unhappy
+      ? `😀 +${hap.happy - hap.unhappy}`
+      : hap.unhappy > hap.happy
+        ? `😡 ${hap.happy - hap.unhappy}`
+        : "😐 0";
   const p = S.players[0];
   const unitOpts = Object.entries(UNITS)
     .filter(([, d]) => !d.gp && (!d.tech || p.techs.includes(d.tech)) && (!d.naval || isCoastal(c.x, c.y)))
@@ -369,6 +381,7 @@ function showCity(c) {
     <div class="civ-dialog civ-city">
       <h2>🏛 ${c.name} <span class="civ-pop">население ${c.pop}</span></h2>
       <div class="civ-yields">🌾 ${y.food} (еда) · 🔨 ${y.prod} (произв.) · 🔬 ${y.sci} (наука) · 🪙 ${y.gold} (золото)</div>
+      <div class="civ-growth">Настроение: ${mood} · 😀 ${hap.happy} / 😡 ${hap.unhappy}</div>
       ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeGold}🪙</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
       ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}

@@ -45,7 +45,8 @@ const BUILDINGS = {
   library: { name: "Библиотека", cost: 50, tech: "writing", desc: "+50% науки", effects: { sciMult: 1.5 } },
   walls: { name: "Стены", cost: 40, tech: "masonry", desc: "+50% защиты города", effects: { defMult: 1.5 } },
   forge: { name: "Кузница", cost: 55, tech: "bronze", desc: "+2 производства", effects: { prodFlat: 2 } },
-  temple: { name: "Храм", cost: 50, tech: "mysticism", desc: "+2 культуры", effects: { culture: 2 } },
+  temple: { name: "Храм", cost: 50, tech: "mysticism", desc: "+2 культуры, +1 счастья", effects: { culture: 2, happiness: 1 } },
+  amphitheater: { name: "Амфитеатр", cost: 60, tech: "literature", desc: "+2 счастья", effects: { happiness: 2 } },
   market: { name: "Рынок", cost: 55, tech: "currency", desc: "Удваивает золотой доход от морской торговли", effects: { tradeMult: 2 } },
   university: { name: "Университет", cost: 80, tech: "education", desc: "+3 науки, +1 культуры", effects: { sciFlat: 3, culture: 1 } },
   barracks: { name: "Казармы", cost: 45, tech: "iron", desc: "+1 атаки юнитам, созданным в городе", effects: { unitAtk: 1 } },
@@ -704,6 +705,9 @@ function foundCity(u) {
     culture: 0,
     religion: null,
     relPressure: 0,
+    unhappy: 0,
+    happy: 1,
+    riot: 0,
   };
   S.cities.push(c);
   S.units = S.units.filter((x) => x !== u);
@@ -764,7 +768,7 @@ function tradeActive(c) {
 }
 
 function buildingEffects(c) {
-  const e = { foodFlat: 0, prodFlat: 0, sciFlat: 0, sciMult: 1, defMult: 1, tradeMult: 1, culture: 0, unitAtk: 0, maxPop: 0 };
+  const e = { foodFlat: 0, prodFlat: 0, sciFlat: 0, sciMult: 1, defMult: 1, tradeMult: 1, culture: 0, unitAtk: 0, maxPop: 0, happiness: 0 };
   for (const b of c.buildings) {
     const f = BUILDINGS[b] ? BUILDINGS[b].effects : null;
     if (!f) continue;
@@ -777,8 +781,19 @@ function buildingEffects(c) {
     e.culture += f.culture || 0;
     e.unitAtk += f.unitAtk || 0;
     e.maxPop += f.maxPop || 0;
+    e.happiness += f.happiness || 0;
   }
   return e;
+}
+
+function stateReligionBonus(c) {
+  return 0;
+}
+
+function cityHappiness(c) {
+  const unhappy = Math.max(0, c.pop - 4) + Object.entries(S.relations).reduce((a, [k, r]) => a + (r.war && k.split(":").map(Number).includes(c.owner) ? Math.floor((S.turn - r.since) / 10) : 0), 0);
+  const happy = 1 + buildingEffects(c).happiness + stateReligionBonus(c);
+  return { unhappy, happy, riot: unhappy > happy + 2 };
 }
 
 function playerEffects(pIdx) {
@@ -965,15 +980,25 @@ function processEconomy() {
     const cultGrowth = 1 + e.culture + (c.religion ? 1 : 0);
     c.culture = (c.culture || 0) + cultGrowth;
     p.gpPoints = (p.gpPoints || 0) + Math.floor(cultGrowth / 2);
+    const hap = cityHappiness(c);
+    const wasBad = (c.unhappy || 0) > (c.happy ?? 1);
+    c.unhappy = hap.unhappy;
+    c.happy = hap.happy;
+    const riotNow = hap.riot && !c.riot;
+    c.riot = riotNow ? 1 : 0;
+    if (riotNow) addLog(`Город ${c.name} охвачен бунтом`);
+    else if (c.owner === 0 && hap.unhappy > hap.happy && !wasBad) addLog(`В ${c.name} недовольство: рост остановлен`);
     const surplus = y.food - c.pop * 2;
-    c.foodStored = Math.max(0, c.foodStored + surplus);
+    c.foodStored = Math.max(0, c.foodStored + (hap.unhappy > hap.happy ? Math.min(0, surplus) : surplus));
     const need = 10 + c.pop * 5;
     if (c.foodStored >= need && c.pop < 10 + e.maxPop) {
       c.pop++;
       c.foodStored -= need;
       if (c.owner === 0) addLog(`${c.name} вырос до ${c.pop} населения`);
     }
-    c.prodStored += y.prod * (p.isHuman ? 1 : diff.prodMult);
+    if (!riotNow) c.prodStored += hap.unhappy > hap.happy
+      ? Math.floor(y.prod * 0.5 * (p.isHuman ? 1 : diff.prodMult))
+      : y.prod * (p.isHuman ? 1 : diff.prodMult);
     if (c.producing) {
       const def = c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : WONDERS[c.producing.id];
       const cost = c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : def.cost;
@@ -1174,12 +1199,19 @@ function aiTurnOne(owner) {
       const availWonders = Object.keys(WONDERS).filter((id) =>
         (!WONDERS[id].tech || p.techs.includes(WONDERS[id].tech)) &&
         !S.wonders.some((w) => w.id === id));
-      if (c.pop >= 4 && availWonders.length && Math.random() < diff.wonderChance) {
+      const hap = cityHappiness(c);
+      const happyBld = hap.unhappy > hap.happy
+        ? ["amphitheater", "temple"].find((b) =>
+            !c.buildings.includes(b) && (!BUILDINGS[b].tech || p.techs.includes(BUILDINGS[b].tech)))
+        : null;
+      if (happyBld) {
+        c.producing = { k: "building", id: happyBld };
+      } else if (c.pop >= 4 && availWonders.length && Math.random() < diff.wonderChance) {
         c.producing = { k: "wonder", id: availWonders[(Math.random() * availWonders.length) | 0] };
       } else if (settlers === 0 && myCities < diff.maxCities && Math.random() < diff.settlerChance) {
         c.producing = { k: "unit", id: "settler" };
       } else if (c.pop >= 3 && !c.buildings.includes("library") && Math.random() < 0.35) {
-        const avail = ["granary", "library", "temple", "forge", "market"].filter(
+        const avail = ["granary", "library", "temple", "amphitheater", "forge", "market"].filter(
           (b) => !c.buildings.includes(b) && (!BUILDINGS[b].tech || p.techs.includes(BUILDINGS[b].tech))
         );
         c.producing = avail.length
@@ -1555,6 +1587,9 @@ function load() {
     for (const c of S.cities) {
       if (!c.religion) c.religion = null;
       if (typeof c.relPressure !== "number") c.relPressure = 0;
+      if (typeof c.unhappy !== "number") c.unhappy = 0;
+      if (typeof c.happy !== "number") c.happy = 1;
+      if (!c.riot) c.riot = 0;
     }
     S.players.forEach((p, i) => {
       p.isHuman = i === 0;
@@ -1584,7 +1619,7 @@ export {
   CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD, GREAT_PEOPLE, GP_ORDER,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
-  cityYields, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
+  cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
   unitAvailable, resourceConnected, hasMarble, wonderCost,
@@ -1644,6 +1679,7 @@ export function debugApi() {
     grantFreeTech,
     useGreatPerson,
     cityYields,
+    cityHappiness,
     buildingEffects,
     playerEffects,
     reachable,
