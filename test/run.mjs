@@ -33,10 +33,13 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = process.env.CIV_MUTATION === "a" || process.env.CIV_MUTATION === "b" ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
   b: ["  recomputeBorders();\n  for (const u of S.units) u.moves = UNITS[u.type].moves;", "  for (const u of S.units) u.moves = UNITS[u.type].moves;"],
+  c: ['"+2 производства во всех городах", effects: { prodFlat: 2 }', '"+2 производства во всех городах", effects: { prodFlat: 0 }'],
+  d: ["  aiDiplomacy();\n  aiTurn();", "  aiTurn();"],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -949,15 +952,275 @@ check("renderTopbar culture indicator", topbarSrc.includes("Легендарны
 check("renderOver uses unified new game controls",
   overAppSrc.includes('id="civ-ng-controls"') && !overAppSrc.includes("newGameButtons"));
 
+api.newGame(1);
+api.S.units = [];
+let shoreSpot = null;
+for (let j = 0; j < api.S.map.length && !shoreSpot; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = x + dx, ny = y + dy;
+    if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0) { shoreSpot = { x, y, sx: nx, sy: ny }; break; }
+  }
+}
+if (shoreSpot) {
+  const shoreGalley = api.spawn("galley", 0, shoreSpot.sx, shoreSpot.sy);
+  const marine = api.spawn("warrior", 0, shoreSpot.x, shoreSpot.y);
+  api.moveUnit(marine, shoreSpot.sx, shoreSpot.sy);
+  const beachEnemy = api.spawn("settler", 1, shoreSpot.x, shoreSpot.y);
+  marine.moves = 1;
+  shoreGalley.moves = 1;
+  api.declareWar(0, 1);
+  api.attack(marine, shoreSpot.x, shoreSpot.y);
+  check("passenger cannot attack from ship", api.S.units.includes(beachEnemy) && api.S.units.includes(marine) && marine.moves === 1);
+  api.attack(shoreGalley, shoreSpot.x, shoreSpot.y);
+  check("galley cannot attack land tile", api.S.units.includes(beachEnemy) && api.S.units.includes(shoreGalley) && shoreGalley.moves === 1);
+} else {
+  check("passenger cannot attack from ship", false);
+  check("galley cannot attack land tile", false);
+}
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner === 0);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+api.S.units = [];
+api.S.players[0].techs.push("currency");
+const coloCity = api.S.cities[0];
+coloCity.producing = { k: "wonder", id: "colossus" };
+coloCity.prodStored = 999;
+api.processEconomy();
+check("colossus grants owner tradeMult 2", api.S.wonders.some((w) => w.id === "colossus") && api.playerEffects(0).tradeMult === 2);
+
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+api.S.units = [];
+const holdPair = freeLandPair();
+const holdAi = api.spawn("warrior", 1, holdPair[0][0], holdPair[0][1]);
+const holdVictim = api.spawn("settler", 0, holdPair[1][0], holdPair[1][1]);
+api.S.turn = 99;
+holdAi.moves = 1;
+const holdRnd = Math.random;
+Math.random = () => 0;
+try {
+  api.declareWar(1, 0);
+  api.aiTurnOne(1);
+} finally { Math.random = holdRnd; }
+check("AI attacks adjacent enemy at war", !api.S.units.includes(holdVictim));
+const holdVictim2 = api.spawn("settler", 0, holdPair[1][0], holdPair[1][1]);
+holdAi.x = holdPair[0][0];
+holdAi.y = holdPair[0][1];
+holdAi.moves = 1;
+api.makePeace(0, 1);
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = holdRnd; }
+check("AI holds fire after makePeace", !api.atWar(0, 1) && api.S.units.includes(holdVictim2) &&
+  holdAi.x === holdPair[0][0] && holdAi.y === holdPair[0][1]);
+
+api.newGame(1, 3);
+api.S.units = [];
+const dipSpots = cultSpots();
+for (let i = 0; i < 4; i++) api.foundCity(api.spawn("settler", i, dipSpots[i][0], dipSpots[i][1]));
+api.S.turn = 99;
+api.declareWar(1, 2);
+api.S.cities.find((c) => c.owner === 1).pop = 10;
+api.spawn("knight", 1, dipSpots[1][0], dipSpots[1][1]);
+const dipRnd = Math.random;
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = dipRnd; }
+check("fighting AI opens no second war", api.atWar(1, 2) && !api.atWar(0, 1) && !api.atWar(1, 3));
+
+api.newGame(1, 3);
+api.S.units = [];
+const warSpots = cultSpots();
+for (let i = 0; i < 4; i++) api.foundCity(api.spawn("settler", i, warSpots[i][0], warSpots[i][1]));
+api.S.turn = 99;
+api.S.cities.find((c) => c.owner === 3).pop = 10;
+api.spawn("knight", 3, warSpots[3][0], warSpots[3][1]);
+api.spawn("knight", 3, warSpots[3][0], warSpots[3][1]);
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = dipRnd; }
+check("strong idle AI declares exactly one war", [0, 1, 2].filter((j) => api.atWar(3, j)).length === 1);
+
+api.newGame(1);
+const preMap = api.S.map.slice();
+const preRes = api.S.res.slice();
+let psLand = null, psSea = null, psCity = null;
+for (let j = 0; j < preMap.length; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (preMap[j] === 0 || preMap[j] === 5) continue;
+  if (!psLand) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && preMap[ny * 26 + nx] === 0) { psLand = [x, y]; psSea = [nx, ny]; break; }
+    }
+  }
+  if (psLand && !psCity && Math.max(Math.abs(x - psLand[0]), Math.abs(y - psLand[1])) >= 4) psCity = [x, y];
+}
+if (psLand && psCity) {
+  store["civ1_save"] = JSON.stringify({
+    turn: 17, nextId: 100, difficulty: 1,
+    map: preMap, res: preRes,
+    players: [
+      { name: "Рим", color: "#4a90d9", techs: ["agriculture"], researching: null, progress: 0, isHuman: true },
+      { name: "Галлы", color: "#d9534f", techs: [], researching: null, progress: 0, isHuman: false },
+    ],
+    units: [
+      { id: 90, type: "settler", owner: 0, x: psLand[0], y: psLand[1], moves: 1 },
+      { id: 91, type: "galley", owner: 0, x: psSea[0], y: psSea[1], moves: 3 },
+      { id: 92, type: "warrior", owner: 1, x: psCity[0], y: psCity[1], moves: 1 },
+    ],
+    cities: [{ id: 80, owner: 1, x: psCity[0], y: psCity[1], name: "Герговия", pop: 2, foodStored: 0, prodStored: 0, producing: null, buildings: [] }],
+    explored: new Array(26 * 18).fill(0),
+    log: ["старый сейв"],
+    over: { winner: 1 },
+    sel: null,
+  });
+  check("pre-S2 save loads", api.load() === true);
+  check("pre-S2 migration fills sprint 2 state",
+    Object.keys(api.S.relations).length === 1 && api.S.relations["0:1"].war === false && api.S.relations["0:1"].since === -1 &&
+    Array.isArray(api.S.religions) && api.S.religions.length === 0 &&
+    Array.isArray(api.S.wonders) && api.S.wonders.length === 0 &&
+    api.S.over.winner === 1 && api.S.over.type === "conquest" &&
+    api.S.cities[0].religion === null && api.S.cities[0].relPressure === 0 && api.S.cities[0].culture === 0);
+  check("pre-S2 migration restores derived world",
+    Array.isArray(api.S.waterComp) && api.S.waterComp.length === 26 * 18 &&
+    Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 &&
+    api.getTileOwner()[psCity[1] * 26 + psCity[0]] === 1 &&
+    Array.isArray(api.S.players[0].cityNames) && api.S.players[0].cityNames.length > 0);
+  const preBoarder = api.spawn("warrior", 0, psLand[0], psLand[1]);
+  check("pre-S2 galley keeps transport role", api.reachable(preBoarder).has(psSea[1] * 26 + psSea[0]));
+  api.moveUnit(preBoarder, psSea[0], psSea[1]);
+  check("pre-S2 galley boards unit", preBoarder.x === psSea[0] && preBoarder.y === psSea[1]);
+  api.S.over = null;
+  api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+  let preErr = null;
+  try { for (let i = 0; i < 5; i++) { api.S.over = null; api.endTurn(); } } catch (e) { preErr = e; }
+  check("pre-S2 save lives 5 turns", preErr === null && api.S.turn === 22);
+} else {
+  check("pre-S2 save loads", false);
+}
+
+if (!fast) {
+  api.newGame(1, 3);
+  const startUnits = [0, 1, 2, 3].map((i) => api.S.units.find((u) => u.owner === i && u.type === "settler"));
+  check("4 nations with unique names and colors", api.S.players.length === 4 &&
+    new Set(api.S.players.map((p) => p.name)).size === 4 &&
+    new Set(api.S.players.map((p) => p.color)).size === 4 &&
+    startUnits.every((u) => !!u));
+  let minStartD = 99;
+  for (let a = 0; a < 4; a++)
+    for (let b = a + 1; b < 4; b++)
+      minStartD = Math.min(minStartD, Math.max(Math.abs(startUnits[a].x - startUnits[b].x), Math.abs(startUnits[a].y - startUnits[b].y)));
+  check("player starts pairwise separated", minStartD >= 4);
+  api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+  const aliveInt = (i) => api.S.cities.some((c) => c.owner === i) || api.S.units.some((u) => u.owner === i && u.type === "settler");
+  const refound0 = () => {
+    const to = api.getTileOwner();
+    let li = -1;
+    for (let j = 0; j < api.S.map.length; j++) {
+      const x = j % 26, y = (j / 26) | 0;
+      if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) { li = j; break; }
+    }
+    if (li >= 0) api.foundCity(api.spawn("settler", 0, li % 26, (li / 26) | 0));
+  };
+  let integErr = null, waterAlone = false, invBad = null, aiCitySeen = false;
+  try {
+    for (let t = 0; t < 80; t++) {
+      api.S.over = null;
+      if (!aliveInt(0)) refound0();
+      api.endTurn();
+      if (api.S.cities.some((c) => c.owner > 0)) aiCitySeen = true;
+      for (const u of api.S.units) {
+        if (api.isNaval(u) || api.S.map[u.y * 26 + u.x] !== 0) continue;
+        if (!api.S.units.some((s) => api.isNaval(s) && s.owner === u.owner && s.x === u.x && s.y === u.y)) waterAlone = true;
+      }
+      if ((t + 1) % 10 === 0) {
+        for (let a = 0; a < 4; a++)
+          for (let b = a + 1; b < 4; b++)
+            if (api.atWar(a, b) !== api.atWar(b, a)) invBad = `war asymmetry ${a}:${b}`;
+        const rk = Object.keys(api.S.relations);
+        if (rk.length !== 6 || rk.some((k) => { const [a, b] = k.split(":").map(Number); return rk.includes(b + ":" + a); })) invBad = "relation keys";
+        if (api.S.religions.length > 3 || new Set(api.S.religions.map((r) => r.id)).size !== api.S.religions.length ||
+          api.S.religions.some((r) => !api.RELIGIONS[r.id])) invBad = "religion duplicates";
+        const wIds = api.S.wonders.map((w) => w.id);
+        if (new Set(wIds).size !== wIds.length || api.S.wonders.some((w) => !api.WONDERS[w.id])) invBad = "wonder duplicates";
+        const toInv = api.getTileOwner();
+        if (api.S.cities.some((c) => toInv[c.y * 26 + c.x] !== c.owner)) invBad = "tileOwner mismatch";
+        for (let a = 1; a < 4; a++)
+          for (let b = a + 1; b < 4; b++) {
+            if (!api.atWar(a, b) || (aliveInt(a) && aliveInt(b))) continue;
+            if (!api.S.cities.some((c) => c.owner === a || c.owner === b)) continue;
+            if (api.S.turn - api.S.relations[a + ":" + b].since > 11) invBad = `war with eliminated ${a}:${b}`;
+          }
+      }
+    }
+  } catch (e) { integErr = e; }
+  check("80-turn 4-player game runs clean", integErr === null);
+  check("80 turns advanced", api.S.turn === 81);
+  check("no land units stranded on water", !waterAlone);
+  check("periodic invariants hold", invBad === null);
+  check("AI nations active across the game", aiCitySeen);
+  check("player elimination ends in defeat not limbo", aliveInt(0) ||
+    (!!api.S.over && api.S.over.winner !== 0 && !!api.S.over.type));
+}
+
+if (!fast) {
+  for (const sDiff of [0, 2]) for (const sOpp of [1, 3]) {
+    const tag = `stress 100 diff ${sDiff} opp ${sOpp}`;
+    api.newGame(sDiff, sOpp);
+    api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+    let sErr = null;
+    try {
+      for (let t = 0; t < 100; t++) {
+        api.S.over = null;
+        if (!api.S.cities.some((c) => c.owner === 0) && !api.S.units.some((u) => u.owner === 0 && u.type === "settler")) {
+          const to = api.getTileOwner();
+          let li = -1;
+          for (let j = 0; j < api.S.map.length; j++) {
+            const x = j % 26, y = (j / 26) | 0;
+            if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) { li = j; break; }
+          }
+          if (li >= 0) api.foundCity(api.spawn("settler", 0, li % 26, (li / 26) | 0));
+        }
+        api.endTurn();
+      }
+    } catch (e) { sErr = e; }
+    check(`${tag}: no exceptions`, sErr === null);
+    check(`${tag}: 100 turns advanced`, api.S.turn >= 101);
+    check(`${tag}: world intact`, api.S.map.length === 26 * 18 &&
+      api.S.map.every((t) => Number.isInteger(t) && t >= 0 && t <= 5) &&
+      api.S.units.every((u) => u.x >= 0 && u.y >= 0 && u.x < 26 && u.y < 18 && !!UT[u.type]) &&
+      api.S.cities.every((c) => c.buildings.every((b) => !!BT[b])));
+    const toS2 = api.getTileOwner();
+    check(`${tag}: borders consistent`, api.S.cities.every((c) => toS2[c.y * 26 + c.x] === c.owner) &&
+      toS2.every((o, i) => o === -1 || api.S.cities.some((c) => c.owner === o &&
+        Math.max(Math.abs(c.x - (i % 26)), Math.abs(c.y - ((i / 26) | 0))) <= api.cityRadius(c))));
+    const nP = api.S.players.length;
+    let diploOk = Object.keys(api.S.relations).length === (nP * (nP - 1)) / 2;
+    for (let a = 0; a < nP && diploOk; a++)
+      for (let b = a + 1; b < nP && diploOk; b++)
+        if (api.atWar(a, b) !== api.atWar(b, a)) diploOk = false;
+    const swIds = api.S.wonders.map((w) => w.id);
+    if (new Set(swIds).size !== swIds.length) diploOk = false;
+    if (api.S.religions.length > 3 || new Set(api.S.religions.map((r) => r.id)).size !== api.S.religions.length) diploOk = false;
+    check(`${tag}: diplomacy state consistent`, diploOk);
+  }
+}
+
 if (!mutation) {
-  const expectFail = { a: "FAIL granary +2 food", b: "FAIL processEconomy updates borders after growth" };
-  for (const m of ["a", "b"]) {
-    const r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m } });
+  const expectFail = {
+    a: "FAIL granary +2 food",
+    b: "FAIL processEconomy updates borders after growth",
+    c: "FAIL pyramids +2 prod in all owner cities",
+    d: "FAIL AI-AI peace concluded via endTurn",
+  };
+  for (const m of ["a", "b", "c", "d"]) {
+    const r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     check(`mutation ${m} caught by tests`, r.status !== 0 && r.status !== null && (r.stdout || "").includes(expectFail[m]));
   }
 }
 
-check("suite within time budget", Date.now() - t0 < 20000);
+check("suite within time budget", Date.now() - t0 < 30000);
 
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

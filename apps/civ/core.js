@@ -1071,6 +1071,12 @@ function offerPeace(humanIdx, aiIdx) {
 
 function aiDiplomacy() {
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  for (const k of Object.keys(S.relations)) {
+    const [a, b] = k.split(":").map(Number);
+    if (S.relations[k].war && (!playerAlive(a) || !playerAlive(b))) {
+      S.relations[k].war = false;
+    }
+  }
   const pts = (i) => [
     ...S.units.filter((u) => u.owner === i).map((u) => [u.x, u.y]),
     ...S.cities.filter((c) => c.owner === i).map((c) => [c.x, c.y]),
@@ -1120,7 +1126,7 @@ function legendaryCities(pIdx) {
 function checkVictory() {
   if (S.over) return;
   if (!playerAlive(0)) {
-    let winner = 0;
+    let winner = -1;
     for (let i = 1; i < S.players.length; i++) {
       if (playerAlive(i)) { winner = i; break; }
     }

@@ -253,11 +253,14 @@ function renderOver() {
     rootEl.appendChild(el);
   }
   const type = S.over.type === "culture" ? "culture" : "conquest";
-  const win = S.over.winner === 0;
+  const draw = S.over.winner === -1;
+  const win = !draw && S.over.winner === 0;
   const winner = S.players[S.over.winner] || S.players[0];
-  const title = !win ? "💀 Поражение"
+  const title = draw ? "🤝 Ничья"
+    : !win ? "💀 Поражение"
     : type === "culture" ? "🕊 Культурная победа!" : "🏆 Победа завоеванием!";
-  const sub = !win
+  const sub = draw ? "Взаимное уничтожение: цивилизации пали в одной войне."
+    : !win
     ? `${escapeHtml(winner.name)} победили ${type === "culture" ? "культурно" : "завоеванием"}`
     : type === "culture" ? "Ваши легендарные города — слава веков." : "Все противники повержены.";
   const myCities = S.cities.filter((c) => c.owner === 0);
