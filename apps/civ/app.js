@@ -93,6 +93,7 @@ function buildViewModel() {
       id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner,
       walls: c.buildings.includes("walls"), religion: c.religion || null,
       happy: c.happy ?? 1, unhappy: c.unhappy ?? 0, riot: !!c.riot,
+      revolt: (c.revoltPressure || 0) >= 3,
       wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
     }));
   const units = S.units
@@ -401,6 +402,9 @@ function showCity(c) {
         ? `😡 ${hap.happy - hap.unhappy}`
         : "😐 0";
   const p = S.players[0];
+  const pressure = c.revoltPressure || 0;
+  const presser = c.revoltBy != null ? (S.players[c.revoltBy] || {}).name : null;
+  const held = unitsAt(c.x, c.y).some((u) => u.owner === 0 && UNITS[u.type].atk > 0 && !UNITS[u.type].gp);
   const unitOpts = Object.entries(UNITS)
     .filter(([, d]) => !d.gp && (!d.tech || p.techs.includes(d.tech)) && (!d.naval || isCoastal(c.x, c.y)))
     .map(([id, d]) => {
@@ -438,6 +442,7 @@ function showCity(c) {
       <h2>🏛 ${c.name} <span class="civ-pop">население ${c.pop}</span></h2>
       <div class="civ-yields">🌾 ${y.food} (еда) · 🔨 ${y.prod} (произв.) · 🔬 ${y.sci} (наука) · 🪙 ${y.gold} (золото)</div>
       <div class="civ-growth">Настроение: ${mood} · 😀 ${hap.happy} / 😡 ${hap.unhappy}</div>
+      ${pressure > 0 ? `<div class="civ-warn">⚠ Давление ${escapeHtml(presser || "соседей")}: ${pressure}/5${held ? " · сдерживает гарнизон" : ""}</div>` : ""}
       ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeGold}🪙</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
       ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}

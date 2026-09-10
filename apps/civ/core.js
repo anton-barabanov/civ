@@ -714,6 +714,9 @@ function foundCity(u) {
     unhappy: 0,
     happy: 1,
     riot: 0,
+    revoltPressure: 0,
+    flipCooldown: 0,
+    revoltBy: null,
   };
   S.cities.push(c);
   S.units = S.units.filter((x) => x !== u);
@@ -1063,6 +1066,63 @@ function processWork() {
   for (const u of S.units) if (u.work) u.moves = 0;
 }
 
+function flipCity(c, j) {
+  const old = c.owner;
+  c.owner = j;
+  c.culture = Math.floor((c.culture || 0) / 2);
+  c.prodStored = 0;
+  c.producing = null;
+  c.revoltPressure = 0;
+  c.flipCooldown = 10;
+  c.riot = 0;
+  c.revoltBy = null;
+  S.units = S.units.filter((u) => !(u.x === c.x && u.y === c.y && u.owner === old));
+  if (S.sel && !unitById(S.sel)) S.sel = null;
+  addLog(`Город ${c.name} восстал и присоединился к ${S.players[j].name}!`);
+  recomputeBorders();
+  checkVictory();
+}
+
+function processRevolts() {
+  for (const c of S.cities) {
+    if (c.flipCooldown > 0) { c.flipCooldown--; continue; }
+    const cap = S.cities.filter((o) => o.owner === c.owner)
+      .sort((a, b) => (b.culture || 0) - (a.culture || 0) || a.id - b.id)[0];
+    if (c === cap) {
+      c.revoltPressure = Math.max(0, (c.revoltPressure || 0) - 1);
+      c.revoltBy = null;
+      continue;
+    }
+    const R = cityRadius(c);
+    let total = 0;
+    const foreign = {};
+    for (let dy = -R; dy <= R; dy++)
+      for (let dx = -R; dx <= R; dx++) {
+        const nx = c.x + dx, ny = c.y + dy;
+        if (!inMap(nx, ny)) continue;
+        total++;
+        const o = S.tileOwner[key(nx, ny)];
+        if (o !== -1 && o !== c.owner) foreign[o] = (foreign[o] || 0) + 1;
+      }
+    const best = S.cities
+      .filter((o) => o.owner !== c.owner && !atWar(c.owner, o.owner) &&
+        dist(c.x, c.y, o.x, o.y) <= R + 2 && (o.culture || 0) >= 1.5 * (c.culture || 0))
+      .sort((a, b) => (b.culture || 0) - (a.culture || 0) ||
+        dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y) || a.id - b.id)[0] || null;
+    let delta = -1;
+    if (best && (foreign[best.owner] || 0) / total >= 0.5) {
+      delta = 1 + (c.riot ? 1 : 0);
+      c.revoltBy = best.owner;
+    } else {
+      c.revoltBy = null;
+    }
+    if (S.units.some((u) => u.x === c.x && u.y === c.y && u.owner === c.owner &&
+        UNITS[u.type].atk > 0 && !UNITS[u.type].gp)) delta -= 1;
+    c.revoltPressure = Math.max(0, (c.revoltPressure || 0) + delta);
+    if (best && c.revoltPressure >= 5) flipCity(c, best.owner);
+  }
+}
+
 function processEconomy() {
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
   const strike = new Set();
@@ -1187,6 +1247,7 @@ function processEconomy() {
   checkFoundReligions();
   spreadReligions();
   processWork();
+  processRevolts();
 }
 
 function buyForGold(cityId, k, id) {
@@ -1779,6 +1840,9 @@ function load() {
       if (typeof c.unhappy !== "number") c.unhappy = 0;
       if (typeof c.happy !== "number") c.happy = 1;
       if (!c.riot) c.riot = 0;
+      if (typeof c.revoltPressure !== "number") c.revoltPressure = 0;
+      if (typeof c.flipCooldown !== "number") c.flipCooldown = 0;
+      if (typeof c.revoltBy !== "number") c.revoltBy = null;
     }
     S.players.forEach((p, i) => {
       p.isHuman = i === 0;
@@ -1860,6 +1924,8 @@ export function debugApi() {
     load,
     computeVision,
     processEconomy,
+    processRevolts,
+    flipCity,
     playerGoldPerTurn,
     buyForGold,
     foundReligion,
