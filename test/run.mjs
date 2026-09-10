@@ -33,7 +33,7 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = ["a", "b", "c", "d", "e", "f"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d", "e", "f", "g", "h"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
 const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
@@ -42,6 +42,8 @@ const MUT_TARGETS = {
   d: ["  aiDiplomacy();\n  aiTurn();", "  aiTurn();"],
   e: ["3 + Math.floor(c.pop / 2) + tradeGold", "0 + Math.floor(c.pop / 2) + tradeGold"],
   f: ['  if (S.turn - (r.lastTradeTurn ?? -99) < TRADE_COOLDOWN) return no("обмен был недавно");\n', ""],
+  g: ["Math.max(0, c.pop - 4)", "0"],
+  h: ['im.kind === "farm") f += 1;', 'im.kind === "farm") f += 0;'],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -2110,6 +2112,108 @@ if (!fast) {
   }
 }
 
+api.newGame(1);
+const s4settler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+api.foundCity(s4settler);
+const s4city = api.S.cities[0];
+s4city.pop = 6;
+check("city happiness formula", api.cityHappiness(s4city).unhappy === 2 && api.cityHappiness(s4city).happy === 1);
+s4city.buildings.push("amphitheater");
+check("amphitheater adds happiness", api.cityHappiness(s4city).happy === 3 && api.cityHappiness(s4city).riot === false);
+s4city.buildings = [];
+s4city.pop = 9;
+check("deep unhappiness flags riot", api.cityHappiness(s4city).riot === true);
+s4city.pop = 8;
+
+api.S.players[0].techs.push("mysticism", "literature", "monarchy");
+check("religion founded in capital", api.foundReligion(0, "oracle") === true && s4city.religion === "oracle");
+check("state religion declared", api.declareStateReligion(0, "oracle").ok === true);
+check("state religion adds happiness", api.cityHappiness(s4city).happy === 2);
+api.S.players[1].stateReligion = "oracle";
+check("relWarFactor same religion", api.relWarFactor(0, 1) === 0.5);
+api.S.players[1].stateReligion = "muses";
+check("relWarFactor different religions", api.relWarFactor(0, 1) === 1.3);
+api.S.players[1].stateReligion = null;
+check("relWarFactor neutral", api.relWarFactor(0, 1) === 1);
+
+let p1land = null;
+for (let i = 0; i < api.S.map.length && !p1land; i++) {
+  const x = i % 26, y = (i / 26) | 0;
+  if (api.S.map[i] >= 1 && api.S.map[i] <= 4 && api.S.map[i] !== 5 &&
+    Math.max(Math.abs(x - s4city.x), Math.abs(y - s4city.y)) > 3 && !api.S.cities.some((c) => c.x === x && c.y === y))
+    p1land = [x, y];
+}
+api.foundCity(api.spawn("settler", 1, p1land[0], p1land[1]));
+const p1city = api.S.cities.find((c) => c.owner === 1);
+check("p1 city for missionary", p1city && p1city.owner === 1);
+
+const farmX = Math.min(25, s4city.x + 1), farmY = s4city.y;
+api.S.map[farmY * 26 + farmX] = 1;
+const worker = api.spawn("worker", 0, farmX, farmY);
+check("mine rejected on grass", api.startImprovement(worker.id, "mine").ok === false);
+check("worker starts farm", api.startImprovement(worker.id, "farm").ok === true && worker.work.left === 3);
+const wx = worker.x, wy = worker.y;
+api.moveUnit(worker, wx + 1, wy);
+check("busy worker cannot move", worker.x === wx && worker.y === wy);
+api.cancelWork(worker.id);
+check("work cancelled", worker.work === null && !api.S.impr[wy * 26 + wx]);
+worker.moves = 1;
+api.startImprovement(worker.id, "farm");
+for (let i = 0; i < 3; i++) api.processEconomy();
+const farmIm = api.S.impr[wy * 26 + wx];
+check("farm completes after 3 turns", !!farmIm && farmIm.kind === "farm" && !("left" in farmIm) && worker.work === null);
+const yFarm = api.cityYields(s4city);
+api.S.impr[wy * 26 + wx] = null;
+const yNoFarm = api.cityYields(s4city);
+check("farm adds food when worked", yFarm.food === yNoFarm.food + 1);
+
+const miss = api.spawn("missionary", 0, p1city.x, p1city.y);
+check("missionary spreads faith", api.spreadFaith(miss.id).ok === true && p1city.religion === "oracle");
+check("missionary consumed", !api.S.units.includes(miss));
+
+const revSettler = api.spawn("settler", 0, Math.max(0, s4city.x - 2), Math.max(0, s4city.y - 2));
+api.S.map[revSettler.y * 26 + revSettler.x] = 1;
+api.foundCity(revSettler);
+const revCity = api.S.cities.find((c) => c.id !== s4city.id && c.owner === 0);
+api.flipCity(revCity, 1);
+check("revolt flips city", revCity.owner === 1 && revCity.flipCooldown === 10);
+api.S.over = null;
+api.processEconomy();
+check("flip cooldown ticks", revCity.flipCooldown === 9);
+
+api.S.players[0].techs.push("rocketry");
+s4city.producing = { k: "project", id: "hull" };
+s4city.prodStored = 999;
+api.processEconomy();
+check("space part built", Array.isArray(api.S.space[0]) && api.S.space[0].includes("hull"));
+s4city.producing = { k: "project", id: "hull" };
+s4city.prodStored = 999;
+api.processEconomy();
+check("duplicate part compensated", api.S.space[0].filter((p) => p === "hull").length === 1 && s4city.prodStored >= 74);
+check("spaceship not buyable", api.buyForGold(s4city.id, "project", "engine").ok === false);
+for (const part of ["engine", "crew"]) {
+  s4city.producing = { k: "project", id: part };
+  s4city.prodStored = 999;
+  api.processEconomy();
+}
+api.S.over = null;
+api.endTurn();
+check("science victory triggers", api.S.over && api.S.over.winner === 0 && api.S.over.type === "space");
+
+api.save();
+const rawS4 = JSON.parse(localStorage.getItem("civ1_save"));
+rawS4.space = undefined;
+rawS4.impr = undefined;
+for (const c of rawS4.cities) {
+  delete c.unhappy; delete c.happy; delete c.riot;
+  delete c.revoltPressure; delete c.flipCooldown; delete c.revoltBy;
+}
+for (const p of rawS4.players) delete p.stateReligion;
+localStorage.setItem("civ1_save", JSON.stringify(rawS4));
+check("pre-sprint4 save migrates", api.load() === true && Array.isArray(api.S.impr) && "space" in api.S && api.S.players.every((p) => "stateReligion" in p) && api.S.cities.every((c) => "revoltPressure" in c));
+api.endTurn();
+check("migrated save plays on", api.S.turn >= 1);
+
 if (!mutation) {
   const expectFail = {
     a: "FAIL granary +2 food",
@@ -2118,8 +2222,10 @@ if (!mutation) {
     d: "FAIL AI-AI peace concluded via endTurn",
     e: "FAIL city tax and upkeep converge",
     f: "FAIL trade blocked by cooldown",
+    g: "FAIL city happiness formula",
+    h: "FAIL farm adds food when worked",
   };
-  for (const m of ["a", "b", "c", "d", "e", "f"]) {
+  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h"]) {
     const r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     check(`mutation ${m} caught by tests`, r.status !== 0 && r.status !== null && (r.stdout || "").includes(expectFail[m]));
   }
