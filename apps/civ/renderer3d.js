@@ -229,86 +229,97 @@ export async function createRenderer3D(container, handlers) {
   }
 
   const own = { geos: [], mats: [] };
-  const ownerMats = new Map();
   function ownGeo(g) { own.geos.push(g); return g; }
   function ownMat(m) { own.mats.push(m); return m; }
-  function ownerMat(color) {
-    let m = ownerMats.get(color);
-    if (!m) {
-      m = new THREE.MeshLambertMaterial({ color, flatShading: true });
-      own.mats.push(m);
-      ownerMats.set(color, m);
-    }
-    return m;
-  }
 
   const G = {
-    unitBody: ownGeo(new THREE.CylinderGeometry(0.15, 0.15, 0.5, 10)),
-    unitHead: ownGeo(new THREE.SphereGeometry(0.09, 10, 8)),
-    cityBody: ownGeo(new THREE.BoxGeometry(0.5, 0.35, 0.5)),
-    cityCap: ownGeo(new THREE.BoxGeometry(0.54, 0.04, 0.54)),
-    cityPole: ownGeo(new THREE.CylinderGeometry(0.02, 0.02, 0.34, 6)),
     selRing: ownGeo(new THREE.RingGeometry(0.36, 0.46, 24)),
     dot: ownGeo(new THREE.CircleGeometry(0.1, 10)),
+    readyRing: ownGeo(new THREE.TorusGeometry(0.3, 0.012, 6, 24)),
   };
-  const whiteMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffffff }));
-  const headMat = ownMat(new THREE.MeshLambertMaterial({ color: 0xe8c9a0 }));
   const selMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffe14d, side: THREE.DoubleSide }));
   const dotMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 }));
+  const readyMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffe14d }));
 
-  function makeUnitPlaceholder(type, color) {
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(G.unitBody, ownerMat(color));
-    body.position.y = 0.25;
-    g.add(body);
-    const head = new THREE.Mesh(G.unitHead, headMat);
-    head.position.y = 0.56;
-    g.add(head);
-    return g;
-  }
-
-  function makeCityPlaceholder(color) {
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(G.cityBody, ownerMat(color));
-    body.position.y = 0.175;
-    g.add(body);
-    const cap = new THREE.Mesh(G.cityCap, whiteMat);
-    cap.position.y = 0.365;
-    g.add(cap);
-    const pole = new THREE.Mesh(G.cityPole, whiteMat);
-    pole.position.y = 0.55;
-    g.add(pole);
-    return g;
-  }
+  const unitHolders = new Map();
+  const cityHolders = new Map();
+  const fxRoot = new THREE.Group();
+  overlayRoot.add(fxRoot);
 
   function syncEntities(vm) {
-    while (overlayRoot.children.length) overlayRoot.remove(overlayRoot.children[0]);
+    const seenU = new Set();
     const per = new Map();
     for (const u of vm.units) {
+      seenU.add(u.id);
+      let e = unitHolders.get(u.id);
+      if (!e) {
+        const holder = new THREE.Group();
+        const ring = new THREE.Mesh(G.readyRing, readyMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.visible = false;
+        holder.add(ring);
+        overlayRoot.add(holder);
+        e = { holder, mesh: null, ring, type: null, owner: -1 };
+        unitHolders.set(u.id, e);
+      }
+      if (e.type !== u.type || e.owner !== u.owner) {
+        if (e.mesh) e.holder.remove(e.mesh);
+        e.mesh = models.createUnitMesh(u.type, vm.players[u.owner].color);
+        e.holder.add(e.mesh);
+        e.type = u.type;
+        e.owner = u.owner;
+      }
       const k = u.y * vm.W + u.x;
       const i = per.get(k) || 0;
       per.set(k, i + 1);
-      const g = makeUnitPlaceholder(u.type, vm.players[u.owner].color);
-      const y = vm.tiles[k].terrain === 0 ? -0.03 : 0;
-      g.position.set(tileX(u.x, vm) + i * 0.22, y, tileZ(u.y, vm) + i * 0.22);
-      overlayRoot.add(g);
+      const water = vm.tiles[k].terrain === 0;
+      e.holder.position.set(tileX(u.x, vm) + i * 0.22, water ? -0.03 : 0, tileZ(u.y, vm) + i * 0.22);
+      e.ring.position.y = water ? 0.06 : 0.012;
+      e.ring.visible = u.owner === 0 && u.movesLeft > 0;
     }
+    for (const [id, e] of unitHolders) {
+      if (seenU.has(id)) continue;
+      overlayRoot.remove(e.holder);
+      unitHolders.delete(id);
+    }
+    const seenC = new Set();
     for (const c of vm.cities) {
-      const g = makeCityPlaceholder(vm.players[c.owner].color);
-      g.position.set(tileX(c.x, vm), 0, tileZ(c.y, vm));
-      overlayRoot.add(g);
+      seenC.add(c.id);
+      let e = cityHolders.get(c.id);
+      if (!e) {
+        const holder = new THREE.Group();
+        overlayRoot.add(holder);
+        e = { holder, mesh: null, pop: -1, walls: null, owner: -1 };
+        cityHolders.set(c.id, e);
+      }
+      const walls = !!c.walls;
+      if (e.pop !== c.pop || e.walls !== walls || e.owner !== c.owner) {
+        if (e.mesh) e.holder.remove(e.mesh);
+        e.mesh = models.createCityMesh(c.pop, vm.players[c.owner].color, walls, c.id % 100000);
+        e.holder.add(e.mesh);
+        e.pop = c.pop;
+        e.walls = walls;
+        e.owner = c.owner;
+      }
+      e.holder.position.set(tileX(c.x, vm), 0, tileZ(c.y, vm));
     }
+    for (const [id, e] of cityHolders) {
+      if (seenC.has(id)) continue;
+      overlayRoot.remove(e.holder);
+      cityHolders.delete(id);
+    }
+    while (fxRoot.children.length) fxRoot.remove(fxRoot.children[0]);
     for (const r of vm.reach) {
       const d = new THREE.Mesh(G.dot, dotMat);
       d.rotation.x = -Math.PI / 2;
       d.position.set(tileX(r.x, vm), 0.05, tileZ(r.y, vm));
-      overlayRoot.add(d);
+      fxRoot.add(d);
     }
     if (vm.selected) {
       const s = new THREE.Mesh(G.selRing, selMat);
       s.rotation.x = -Math.PI / 2;
       s.position.set(tileX(vm.selected.x, vm), 0.055, tileZ(vm.selected.y, vm));
-      overlayRoot.add(s);
+      fxRoot.add(s);
     }
   }
 
@@ -407,7 +418,8 @@ export async function createRenderer3D(container, handlers) {
     for (const m of own.mats) m.dispose();
     for (const m of dimCache.values()) m.dispose();
     dimCache.clear();
-    ownerMats.clear();
+    unitHolders.clear();
+    cityHolders.clear();
     borderSegs.clear();
     borderMats.clear();
     borderKey = null;

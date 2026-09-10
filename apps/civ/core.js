@@ -17,6 +17,11 @@ const UNITS = {
   swordsman: { name: "Мечник", letter: "М", icon: "🗡️", atk: 5, def: 4, moves: 1, cost: 45, tech: "iron" },
   galley: { name: "Галера", letter: "Г", icon: "⛵", atk: 3, def: 2, moves: 3, cost: 35, tech: "sailing", naval: true },
   caravel: { name: "Каравелла", letter: "К", icon: "🚢", atk: 5, def: 3, moves: 4, cost: 55, tech: "astronomy", naval: true },
+  spearman: { name: "Копейщик", letter: "Ц", icon: "🔱", atk: 3, def: 5, moves: 1, cost: 40, tech: "bronze" },
+  horseman: { name: "Всадник", letter: "Вс", icon: "🐎", atk: 5, def: 3, moves: 2, cost: 55, tech: "horsebackriding" },
+  catapult: { name: "Катапульта", letter: "Т", icon: "💥", atk: 10, def: 2, moves: 1, cost: 70, tech: "machinery" },
+  knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism" },
+  musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder" },
 };
 
 const DIFFICULTIES = [
@@ -26,10 +31,15 @@ const DIFFICULTIES = [
 ];
 
 const BUILDINGS = {
-  granary: { name: "Амбар", cost: 40, tech: "pottery", desc: "+2 еды в городе" },
-  library: { name: "Библиотека", cost: 50, tech: "writing", desc: "+50% науки в городе" },
-  walls: { name: "Стены", cost: 40, tech: "masonry", desc: "+50% защиты города" },
-  forge: { name: "Кузница", cost: 55, tech: "bronze", desc: "+2 производства в городе" },
+  granary: { name: "Амбар", cost: 40, tech: "pottery", desc: "+2 еды", effects: { foodFlat: 2 } },
+  library: { name: "Библиотека", cost: 50, tech: "writing", desc: "+50% науки", effects: { sciMult: 1.5 } },
+  walls: { name: "Стены", cost: 40, tech: "masonry", desc: "+50% защиты города", effects: { defMult: 1.5 } },
+  forge: { name: "Кузница", cost: 55, tech: "bronze", desc: "+2 производства", effects: { prodFlat: 2 } },
+  temple: { name: "Храм", cost: 50, tech: "mysticism", desc: "+2 культуры", effects: { culture: 2 } },
+  market: { name: "Рынок", cost: 55, tech: "currency", desc: "Удваивает бонус морской торговли", effects: { tradeMult: 2 } },
+  university: { name: "Университет", cost: 80, tech: "education", desc: "+3 науки, +1 культуры", effects: { sciFlat: 3, culture: 1 } },
+  barracks: { name: "Казармы", cost: 45, tech: "iron", desc: "+1 атаки юнитам, созданным в городе", effects: { unitAtk: 1 } },
+  aqueduct: { name: "Акведук", cost: 60, tech: "engineering", desc: "+3 к пределу населения", effects: { maxPop: 3 } },
 };
 
 const TECHS = {
@@ -47,6 +57,15 @@ const TECHS = {
   construction: { name: "Строительство", cost: 70, req: ["masonry", "wheel"] },
   currency: { name: "Деньги", cost: 70, req: ["mathematics"] },
   literature: { name: "Литература", cost: 80, req: ["writing", "currency"] },
+  mysticism: { name: "Мистицизм", cost: 26, req: ["agriculture"] },
+  horsebackriding: { name: "Коневодство", cost: 55, req: ["wheel"] },
+  monarchy: { name: "Монархия", cost: 80, req: ["mysticism", "bronze"] },
+  feudalism: { name: "Кодекс рыцаря", cost: 110, req: ["monarchy", "iron"] },
+  engineering: { name: "Инженерия", cost: 90, req: ["construction", "mathematics"] },
+  machinery: { name: "Машиностроение", cost: 120, req: ["engineering"] },
+  banking: { name: "Банковское дело", cost: 105, req: ["currency", "monarchy"] },
+  education: { name: "Образование", cost: 115, req: ["literature", "mathematics"] },
+  gunpowder: { name: "Порох", cost: 140, req: ["machinery", "education"] },
 };
 
 const CITY_NAMES = [
@@ -425,14 +444,14 @@ function attack(att, x, y) {
   const def = defs[0];
   if (!def) return;
   if (isNaval(att) && S.map[key(x, y)] !== TILE.OCEAN) return;
-  const A = UNITS[att.type].atk;
+  const A = UNITS[att.type].atk + (att.atkBonus || 0);
   let D = UNITS[def.type].def;
   const t = S.map[key(x, y)];
   D *= 1 + TERRAIN[t].def / 100;
   if (!isNaval(def) && t === TILE.OCEAN) D *= 0.5;
   if (city) {
     D *= 1.25;
-    if (city.buildings.includes("walls")) D *= 1.5;
+    D *= buildingEffects(city).defMult;
   }
   const r = A / D;
   const p = Math.min(0.95, Math.max(0.05, r / (r + 1)));
@@ -538,6 +557,24 @@ function tradeActive(c) {
   );
 }
 
+function buildingEffects(c) {
+  const e = { foodFlat: 0, prodFlat: 0, sciFlat: 0, sciMult: 1, defMult: 1, tradeMult: 1, culture: 0, unitAtk: 0, maxPop: 0 };
+  for (const b of c.buildings) {
+    const f = BUILDINGS[b] ? BUILDINGS[b].effects : null;
+    if (!f) continue;
+    e.foodFlat += f.foodFlat || 0;
+    e.prodFlat += f.prodFlat || 0;
+    e.sciFlat += f.sciFlat || 0;
+    e.sciMult *= f.sciMult || 1;
+    e.defMult *= f.defMult || 1;
+    e.tradeMult *= f.tradeMult || 1;
+    e.culture += f.culture || 0;
+    e.unitAtk += f.unitAtk || 0;
+    e.maxPop += f.maxPop || 0;
+  }
+  return e;
+}
+
 function cityYields(c) {
   let food = 2, prod = 1;
   const cand = [];
@@ -560,11 +597,12 @@ function cityYields(c) {
     food += cand[i][0];
     prod += cand[i][1];
   }
-  if (c.buildings.includes("granary")) food += 2;
-  if (c.buildings.includes("forge")) prod += 2;
-  let sci = 2 + Math.floor(c.pop / 2);
-  if (c.buildings.includes("library")) sci = Math.round(sci * 1.5);
-  if (tradeActive(c)) { prod += 2; sci += 1; }
+  const e = buildingEffects(c);
+  food += e.foodFlat;
+  prod += e.prodFlat;
+  let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat;
+  sci = Math.round(sci * e.sciMult);
+  if (tradeActive(c)) { prod += 2 * e.tradeMult; sci += 1 * e.tradeMult; }
   return { food, prod, sci, trade: tradeActive(c) };
 }
 
@@ -578,11 +616,12 @@ function processEconomy() {
   for (const c of S.cities) {
     const p = S.players[c.owner];
     const y = cityYields(c);
-    c.culture = (c.culture || 0) + 1 + (c.buildings.includes("library") ? 1 : 0);
+    const e = buildingEffects(c);
+    c.culture = (c.culture || 0) + 1 + e.culture;
     const surplus = y.food - c.pop * 2;
     c.foodStored = Math.max(0, c.foodStored + surplus);
     const need = 10 + c.pop * 5;
-    if (c.foodStored >= need && c.pop < 10) {
+    if (c.foodStored >= need && c.pop < 10 + e.maxPop) {
       c.pop++;
       c.foodStored -= need;
       if (c.owner === 0) addLog(`${c.name} вырос до ${c.pop} населения`);
@@ -594,18 +633,20 @@ function processEconomy() {
         c.prodStored -= def.cost;
         if (c.producing.k === "unit") {
           const spec = UNITS[c.producing.id];
+          let born = null;
           if (spec.naval) {
             const w = adjWater(c.x, c.y);
             if (w) {
-              spawn(c.producing.id, c.owner, w[0], w[1]);
+              born = spawn(c.producing.id, c.owner, w[0], w[1]);
               if (c.owner === 0) addLog(`${c.name}: построена ${spec.name}`);
             } else {
               c.prodStored = 0;
             }
           } else {
-            spawn(c.producing.id, c.owner, c.x, c.y);
+            born = spawn(c.producing.id, c.owner, c.x, c.y);
             if (c.owner === 0) addLog(`${c.name}: построен ${spec.name}`);
           }
+          if (born) born.atkBonus = e.unitAtk;
         } else {
           c.buildings.push(c.producing.id);
           if (c.owner === 0) addLog(`${c.name}: построена ${def.name}`);
@@ -643,13 +684,19 @@ function aiTurn() {
     if (!c.producing) {
       const settlers = S.units.filter((u) => u.owner === 1 && u.type === "settler").length;
       const myCities = S.cities.filter((x) => x.owner === 1).length;
+      const bestUnit = () => ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+        .find((t) => !UNITS[t].tech || p.techs.includes(UNITS[t].tech));
       if (settlers === 0 && myCities < diff.maxCities && Math.random() < diff.settlerChance) {
         c.producing = { k: "unit", id: "settler" };
-      } else {
-        const best = ["swordsman", "archer", "warrior"].find(
-          (t) => !UNITS[t].tech || p.techs.includes(UNITS[t].tech)
+      } else if (c.pop >= 3 && !c.buildings.includes("library") && Math.random() < 0.35) {
+        const avail = ["granary", "library", "temple", "forge", "market"].filter(
+          (b) => !c.buildings.includes(b) && (!BUILDINGS[b].tech || p.techs.includes(BUILDINGS[b].tech))
         );
-        c.producing = { k: "unit", id: best };
+        c.producing = avail.length
+          ? { k: "building", id: avail[(Math.random() * avail.length) | 0] }
+          : { k: "unit", id: bestUnit() };
+      } else {
+        c.producing = { k: "unit", id: bestUnit() };
       }
     }
   }
@@ -783,8 +830,12 @@ export {
 export function debugApi() {
   return {
     get S() { return S; },
+    get TECHS() { return TECHS; },
+    get UNITS() { return UNITS; },
+    get BUILDINGS() { return BUILDINGS; },
     newGame,
     endTurn,
+    aiTurn,
     foundCity,
     attack,
     spawn,
@@ -794,6 +845,7 @@ export function debugApi() {
     processEconomy,
     techAvailable,
     cityYields,
+    buildingEffects,
     reachable,
     canEnter,
     isNaval,

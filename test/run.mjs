@@ -218,6 +218,9 @@ if (pair) {
   if (traded[0]) {
     const yy = api.cityYields(traded[0]);
     check("sea trade bonus applied", yy.trade === true && yy.prod >= 3 && yy.sci >= 3);
+    traded[0].buildings.push("market");
+    const ym = api.cityYields(traded[0]);
+    check("market doubles sea trade", ym.prod === yy.prod + 2 && ym.sci === yy.sci + 1);
   }
 } else {
   check("sea trade between coastal cities", false);
@@ -323,6 +326,113 @@ check("tileOwner serialized as array", Array.isArray(rawNew.tileOwner) && rawNew
 check("save-load roundtrip borders", api.load() === true && api.getTileOwner().join(",") === rawNew.tileOwner.join(","));
 for (let i = 0; i < 10; i++) api.endTurn();
 check("stable after migration + 10 turns", Array.isArray(api.S.tileOwner) && (api.S.turn === 11 || !!api.S.over));
+
+api.newGame(1);
+const TT = api.TECHS, UT = api.UNITS, BT = api.BUILDINGS;
+check("debugApi exposes tables", !!(TT && UT && BT && BT.aqueduct.effects.maxPop === 3));
+
+const techIds = Object.keys(TT);
+const reqsValid = techIds.every((id) => TT[id].req.every((r) => techIds.includes(r)));
+const color = {};
+let cycle = false;
+const dfs = (id) => {
+  color[id] = 1;
+  for (const r of TT[id].req) {
+    if (color[r] === 1) cycle = true;
+    else if (!color[r]) dfs(r);
+  }
+  color[id] = 2;
+};
+techIds.forEach((id) => { if (!color[id]) dfs(id); });
+const roots = techIds.filter((id) => TT[id].req.length === 0);
+const reach = new Set(roots);
+const q = [...roots];
+while (q.length) {
+  const cur = q.pop();
+  for (const id of techIds) if (TT[id].req.includes(cur) && !reach.has(id)) { reach.add(id); q.push(id); }
+}
+check("tech tree acyclic, reqs valid", reqsValid && !cycle);
+check("tech tree fully reachable from roots", roots.length > 0 && reach.size === techIds.length);
+check("9 new techs added", ["mysticism", "horsebackriding", "monarchy", "feudalism", "engineering", "machinery", "banking", "education", "gunpowder"].every((t) => TT[t] && TT[t].cost > 0 && TT[t].name));
+check("5 new units added", ["spearman", "horseman", "catapult", "knight", "musketman"].every((u) => UT[u] && UT[u].atk > 0 && UT[u].icon && UT[u].cost > 0));
+check("5 new buildings have effects", ["temple", "market", "university", "barracks", "aqueduct"].every((b) => BT[b] && BT[b].effects && BT[b].desc));
+
+const fxSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+api.foundCity(fxSettler);
+const fx = api.S.cities.find((c) => c.owner === 0);
+check("effects test city founded", !!fx);
+if (fx) {
+  const yNone = api.cityYields(fx);
+  fx.buildings = ["granary"];
+  const yGran = api.cityYields(fx);
+  fx.buildings = ["granary", "library"];
+  const yLib = api.cityYields(fx);
+  fx.buildings = ["forge"];
+  const yForge = api.cityYields(fx);
+  check("granary +2 food", yGran.food === yNone.food + 2);
+  check("library sciMult 1.5", yLib.sci === Math.round((2 + Math.floor(fx.pop / 2)) * 1.5) && yLib.sci > yGran.sci);
+  check("forge +2 prod", yForge.prod === yNone.prod + 2);
+
+  fx.buildings = ["walls"];
+  check("walls defMult 1.5 via buildingEffects", api.buildingEffects(fx).defMult === 1.5);
+  fx.buildings = [];
+  check("defMult defaults to 1", api.buildingEffects(fx).defMult === 1);
+
+  fx.culture = 0;
+  fx.buildings = ["temple"];
+  api.processEconomy();
+  const cult1 = fx.culture;
+  api.processEconomy();
+  check("temple +3 culture per turn", cult1 === 3 && fx.culture === 6);
+  fx.buildings = ["library"];
+  fx.culture = 0;
+  api.processEconomy();
+  check("library no longer gives culture", fx.culture === 1);
+
+  fx.buildings = ["barracks"];
+  fx.producing = { k: "unit", id: "warrior" };
+  fx.prodStored = 999;
+  const n0 = api.S.units.length;
+  api.processEconomy();
+  const born = api.S.units[api.S.units.length - 1];
+  check("barracks grants atkBonus 1", api.S.units.length === n0 + 1 && born.type === "warrior" && born.atkBonus === 1);
+  fx.buildings = [];
+  fx.producing = { k: "unit", id: "warrior" };
+  fx.prodStored = 999;
+  api.processEconomy();
+  check("no barracks atkBonus 0", api.S.units[api.S.units.length - 1].atkBonus === 0);
+
+  api.S.players[0].techs.push("gunpowder");
+  fx.producing = { k: "unit", id: "musketman" };
+  fx.prodStored = 999;
+  api.processEconomy();
+  check("musketman produced with tech", api.S.units.some((u) => u.owner === 0 && u.type === "musketman" && u.moves === UT.musketman.moves));
+  check("new units spawnable", ["spearman", "horseman", "catapult", "knight", "musketman"].every((t) => api.spawn(t, 0, fx.x, fx.y).type === t));
+
+  fx.buildings = ["aqueduct"];
+  fx.pop = 10;
+  fx.foodStored = 999;
+  api.processEconomy();
+  check("aqueduct raises pop cap above 10", fx.pop === 11);
+  fx.buildings = [];
+  fx.pop = 10;
+  fx.foodStored = 999;
+  api.processEconomy();
+  check("pop capped at 10 without aqueduct", fx.pop === 10);
+}
+
+const aiSettler2 = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+api.foundCity(aiSettler2);
+const aiFx = api.S.cities.find((c) => c.owner === 1);
+check("AI test city founded", !!aiFx);
+if (aiFx) {
+  api.S.players[1].techs.push("machinery");
+  api.spawn("settler", 1, aiFx.x, aiFx.y);
+  aiFx.producing = null;
+  aiFx.pop = 1;
+  api.aiTurn();
+  check("AI produces new unit type", aiFx.producing && aiFx.producing.k === "unit" && aiFx.producing.id === "catapult");
+}
 
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

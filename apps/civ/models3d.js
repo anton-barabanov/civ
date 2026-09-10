@@ -72,6 +72,19 @@ function addFigure(group, ownerMat, bodyR, bodyH, x, z) {
   add(group, headGeo, mat(C.skin), x, bodyH + 0.06, z);
 }
 
+function addHorse(group) {
+  const coat = mat(C.wood);
+  add(group, geo("u:horseBody", () => new THREE.BoxGeometry(0.34, 0.13, 0.14)), coat, 0, 0.27, 0);
+  add(group, geo("u:horseNeck", () => new THREE.BoxGeometry(0.08, 0.22, 0.09)), coat, 0.14, 0.4, 0).rotation.z = -0.55;
+  add(group, geo("u:horseHead", () => new THREE.BoxGeometry(0.13, 0.07, 0.08)), mat(C.woodDark), 0.22, 0.5, 0);
+  add(group, geo("u:horseTail", () => new THREE.BoxGeometry(0.05, 0.12, 0.03)), mat(C.woodDark), -0.19, 0.32, 0).rotation.z = 0.5;
+  const legGeo = geo("u:horseLeg", () => new THREE.CylinderGeometry(0.018, 0.018, 0.21, 5));
+  add(group, legGeo, coat, 0.12, 0.105, 0.05);
+  add(group, legGeo, coat, 0.12, 0.105, -0.05);
+  add(group, legGeo, coat, -0.12, 0.105, 0.05);
+  add(group, legGeo, coat, -0.12, 0.105, -0.05);
+}
+
 function makeWaveGeometry() {
   const p = new THREE.PlaneGeometry(1, 1, 4, 4);
   const pos = p.attributes.position;
@@ -172,6 +185,51 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     add(group, geo("u:helm", () => new THREE.SphereGeometry(0.105, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2)), metal, 0, 0.46, 0);
     add(group, geo("u:blade2", () => new THREE.BoxGeometry(0.05, 0.44, 0.024)), metal, 0.2, 0.52, 0.05).rotation.z = 0.18;
     add(group, geo("u:guard2", () => new THREE.BoxGeometry(0.13, 0.03, 0.04)), woodDark, 0.135, 0.34, 0.05).rotation.z = 0.18;
+  } else if (unitType === "spearman") {
+    addFigure(group, om, 0.1, 0.36, 0, 0);
+    add(group, geo("u:spear", () => new THREE.CylinderGeometry(0.011, 0.011, 0.78, 5)), woodDark, 0.17, 0.38, 0.06).rotation.z = -0.1;
+    add(group, geo("u:spearTip", () => new THREE.ConeGeometry(0.028, 0.13, 5)), metal, 0.21, 0.77, 0.06).rotation.z = -0.1;
+    add(group, geo("u:shield", () => new THREE.CylinderGeometry(0.11, 0.11, 0.03, 10)), wood, -0.15, 0.26, 0.04).rotation.z = Math.PI / 2;
+    add(group, geo("u:boss", () => new THREE.SphereGeometry(0.03, 6, 5)), metal, -0.175, 0.26, 0.04);
+  } else if (unitType === "horseman") {
+    addHorse(group);
+    const rider = new THREE.Group();
+    rider.position.set(-0.02, 0.28, 0);
+    group.add(rider);
+    addFigure(rider, om, 0.07, 0.24, 0, 0);
+  } else if (unitType === "knight") {
+    addHorse(group);
+    const rider = new THREE.Group();
+    rider.position.set(-0.02, 0.28, 0);
+    group.add(rider);
+    addFigure(rider, om, 0.08, 0.26, 0, 0);
+    add(rider, geo("u:helmK", () => new THREE.SphereGeometry(0.085, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2)), metal, 0, 0.32, 0);
+    add(rider, geo("u:lance", () => new THREE.CylinderGeometry(0.011, 0.011, 0.62, 5)), woodDark, 0.22, 0.22, 0.04).rotation.z = -1.2;
+    add(rider, geo("u:lanceTip", () => new THREE.ConeGeometry(0.024, 0.1, 5)), metal, 0.51, 0.34, 0.04).rotation.z = -1.2;
+    add(rider, geo("u:shieldK", () => new THREE.CylinderGeometry(0.085, 0.085, 0.025, 10)), om, -0.09, 0.14, 0.08).rotation.z = Math.PI / 2;
+  } else if (unitType === "catapult") {
+    add(group, geo("u:catBase", () => new THREE.BoxGeometry(0.42, 0.06, 0.26)), wood, 0, 0.11, 0);
+    const wheelGeo = geo("u:wheel", () => new THREE.CylinderGeometry(0.08, 0.08, 0.024, 9));
+    add(group, wheelGeo, woodDark, 0.15, 0.08, 0.09).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, woodDark, 0.15, 0.08, -0.135).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, woodDark, -0.15, 0.08, 0.09).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, woodDark, -0.15, 0.08, -0.135).rotation.x = Math.PI / 2;
+    const postGeo = geo("u:catPost", () => new THREE.BoxGeometry(0.05, 0.18, 0.04));
+    add(group, postGeo, woodDark, -0.06, 0.21, 0.06);
+    add(group, postGeo, woodDark, -0.06, 0.21, -0.06);
+    const pivot = new THREE.Group();
+    pivot.position.set(-0.06, 0.28, 0);
+    pivot.rotation.z = Math.PI / 4;
+    group.add(pivot);
+    add(pivot, geo("u:catArm", () => new THREE.BoxGeometry(0.55, 0.04, 0.05)), woodDark, 0.12, 0, 0);
+    add(pivot, geo("u:catWeight", () => new THREE.BoxGeometry(0.14, 0.14, 0.14)), mat(C.stoneDark), -0.22, 0, 0);
+    add(pivot, geo("u:catCup", () => new THREE.CylinderGeometry(0.055, 0.035, 0.06, 6)), wood, 0.37, 0.03, 0);
+  } else if (unitType === "musketman") {
+    addFigure(group, om, 0.1, 0.38, 0, 0);
+    add(group, geo("u:hatM", () => new THREE.CylinderGeometry(0.095, 0.115, 0.045, 8)), mat(C.stoneDark), 0, 0.44, 0);
+    const gun = add(group, geo("u:musket", () => new THREE.BoxGeometry(0.52, 0.028, 0.028)), woodDark, 0, 0.42, 0.06);
+    gun.rotation.z = 0.5;
+    add(gun, geo("u:musketTip", () => new THREE.BoxGeometry(0.15, 0.022, 0.022)), metal, 0.3, 0, 0);
   } else if (unitType === "galley") {
     add(group, geo("u:hullG", () => new THREE.BoxGeometry(0.56, 0.1, 0.2)), wood, 0, 0.08, 0);
     add(group, geo("u:bowG", () => new THREE.ConeGeometry(0.09, 0.16, 4)), wood, 0.35, 0.08, 0).rotation.z = -Math.PI / 2;
