@@ -77,7 +77,7 @@ function buildViewModel() {
         res: S.res ? S.res[k] : null,
         explored: !!S.explored[k],
         visible: !!visible[k],
-        owner: -1,
+        owner: S.tileOwner ? S.tileOwner[k] : -1,
       });
     }
   const cities = S.cities
@@ -180,7 +180,8 @@ function renderPanel() {
         <span class="civ-terr">${t.name}${t.def ? ` (+${t.def}% защ.)` : ""}</span>
       </div>`;
     if (sel.type === "settler" && !cityAt(sel.x, sel.y) && TERRAIN[S.map[key(sel.x, sel.y)]].passable) {
-      body += `<button class="btn primary" id="civ-found">Основать город</button>`;
+      const tOwner = S.tileOwner ? S.tileOwner[key(sel.x, sel.y)] : -1;
+      if (tOwner === -1 || tOwner === 0) body += `<button class="btn primary" id="civ-found">Основать город</button>`;
     }
     const ownCity = cityAt(sel.x, sel.y);
     if (ownCity && ownCity.owner === 0) {

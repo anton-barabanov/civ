@@ -53,6 +53,22 @@ export function createRenderer2D(container, handlers) {
         ctx.fillRect(t.x * TS, t.y * TS, TS - 1, TS - 1);
       }
     }
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 2;
+    const ownAt = (x, y) => (x < 0 || y < 0 || x >= vm.W || y >= vm.H) ? -1 : vm.tiles[y * vm.W + x].owner;
+    for (const t of vm.tiles) {
+      if (!t.explored || t.owner < 0 || !vm.players[t.owner]) continue;
+      ctx.strokeStyle = vm.players[t.owner].color;
+      const px = t.x * TS, py = t.y * TS, s = TS - 1;
+      ctx.beginPath();
+      if (ownAt(t.x, t.y - 1) !== t.owner) { ctx.moveTo(px, py); ctx.lineTo(px + s, py); }
+      if (ownAt(t.x, t.y + 1) !== t.owner) { ctx.moveTo(px, py + s); ctx.lineTo(px + s, py + s); }
+      if (ownAt(t.x - 1, t.y) !== t.owner) { ctx.moveTo(px, py); ctx.lineTo(px, py + s); }
+      if (ownAt(t.x + 1, t.y) !== t.owner) { ctx.moveTo(px + s, py); ctx.lineTo(px + s, py + s); }
+      ctx.stroke();
+    }
+    ctx.restore();
     for (const c of vm.cities) {
       const px = c.x * TS, py = c.y * TS;
       ctx.fillStyle = "rgba(0,0,0,0.35)";

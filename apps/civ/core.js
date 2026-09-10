@@ -314,6 +314,7 @@ function newGame(diff = 1) {
     units: [],
     cities: [],
     explored: new Array(W * H).fill(0),
+    tileOwner: new Array(W * H).fill(-1),
     log: ["Игра началась. Основайте город поселенцем."],
     over: null,
     sel: null,
@@ -357,6 +358,18 @@ function computeVision() {
           S.explored[key(c.x + dx, c.y + dy)] = 1;
         }
   }
+  if (S.tileOwner) {
+    for (let i = 0; i < W * H; i++) {
+      if (S.tileOwner[i] !== 0) continue;
+      const x = i % W, y = (i / W) | 0;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++)
+          if (inMap(x + dx, y + dy)) {
+            visible[key(x + dx, y + dy)] = 1;
+            S.explored[key(x + dx, y + dy)] = 1;
+          }
+    }
+  }
 }
 
 function reachable(u) {
@@ -397,10 +410,12 @@ function moveUnit(u, x, y) {
 function captureCity(c, owner) {
   c.owner = owner;
   c.pop = Math.max(1, c.pop - 1);
+  c.culture = Math.floor((c.culture || 0) / 2);
   c.producing = null;
   c.prodStored = 0;
   if (owner === 0) addLog(`Вы захватили город ${c.name}!`);
   else addLog(`${S.players[1].name} захватили город ${c.name}!`);
+  recomputeBorders();
   checkVictory();
 }
 
@@ -446,6 +461,11 @@ function addLog(msg) {
 }
 
 function foundCity(u) {
+  const k = key(u.x, u.y);
+  if (S.tileOwner && S.tileOwner[k] !== -1 && S.tileOwner[k] !== u.owner) {
+    addLog("Нельзя основать город на чужой территории");
+    return false;
+  }
   const name = CITY_NAMES[u.owner].pop() || `Город ${S.nextId}`;
   const c = {
     id: S.nextId++,
@@ -458,12 +478,46 @@ function foundCity(u) {
     prodStored: 0,
     producing: null,
     buildings: [],
+    culture: 0,
   };
   S.cities.push(c);
   S.units = S.units.filter((x) => x !== u);
   if (S.sel === u.id) S.sel = null;
   addLog(`${S.players[u.owner].name}: основан город ${name}`);
+  recomputeBorders();
   computeVision();
+  return true;
+}
+
+function cityRadius(c) {
+  return Math.min(4, 1 + Math.floor((c.pop - 1) / 3) + Math.floor((c.culture || 0) / 40));
+}
+
+function recomputeBorders() {
+  const owner = new Array(W * H).fill(-1);
+  const holder = new Array(W * H).fill(null);
+  for (const c of S.cities) {
+    const R = cityRadius(c);
+    for (let dy = -R; dy <= R; dy++)
+      for (let dx = -R; dx <= R; dx++) {
+        const nx = c.x + dx, ny = c.y + dy;
+        if (!inMap(nx, ny)) continue;
+        const k = key(nx, ny);
+        const cur = holder[k];
+        if (cur) {
+          const d = dist(c.x, c.y, nx, ny);
+          const cd = dist(cur.x, cur.y, nx, ny);
+          if (d > cd) continue;
+          if (d === cd) {
+            const cc = c.culture || 0, kc = cur.culture || 0;
+            if (kc > cc || (kc === cc && cur.id < c.id)) continue;
+          }
+        }
+        owner[k] = c.owner;
+        holder[k] = c;
+      }
+  }
+  S.tileOwner = owner;
 }
 
 function waterAdjKeys(x, y) {
@@ -493,6 +547,7 @@ function cityYields(c) {
       const nx = c.x + dx, ny = c.y + dy;
       if (!inMap(nx, ny)) continue;
       if (cityAt(nx, ny)) continue;
+      if (S.tileOwner && S.tileOwner[key(nx, ny)] !== c.owner) continue;
       const t = TERRAIN[S.map[key(nx, ny)]];
       let f = t.food, p = t.prod;
       const r = S.res ? S.res[key(nx, ny)] : null;
@@ -523,6 +578,7 @@ function processEconomy() {
   for (const c of S.cities) {
     const p = S.players[c.owner];
     const y = cityYields(c);
+    c.culture = (c.culture || 0) + 1 + (c.buildings.includes("library") ? 1 : 0);
     const surplus = y.food - c.pop * 2;
     c.foodStored = Math.max(0, c.foodStored + surplus);
     const need = 10 + c.pop * 5;
@@ -576,6 +632,7 @@ function processEconomy() {
       }
     }
   }
+  recomputeBorders();
   for (const u of S.units) u.moves = UNITS[u.type].moves;
 }
 
@@ -604,6 +661,7 @@ function aiTurn() {
       for (let y = 0; y < H; y++)
         for (let x = 0; x < W; x++) {
           if (!TERRAIN[S.map[key(x, y)]].passable || cityAt(x, y)) continue;
+          if (S.tileOwner[key(x, y)] === 0) continue;
           if (dist(u.x, u.y, x, y) > 12) continue;
           const near = S.cities.some((c) => dist(c.x, c.y, x, y) < 3);
           if (near) continue;
@@ -705,6 +763,9 @@ function load() {
     S = JSON.parse(raw);
     if (!S.res) S.res = new Array(W * H).fill(null);
     if (!S.waterComp) S.waterComp = computeWaterComps(S.map);
+    if (!Array.isArray(S.tileOwner)) S.tileOwner = new Array(W * H).fill(-1);
+    for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
+    recomputeBorders();
     return !!S && !!S.map;
   } catch { return false; }
 }
@@ -737,5 +798,8 @@ export function debugApi() {
     canEnter,
     isNaval,
     tradeActive,
+    recomputeBorders,
+    cityRadius,
+    getTileOwner: () => Array.from(S.tileOwner),
   };
 }

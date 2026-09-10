@@ -243,5 +243,86 @@ api.processEconomy();
 const prodHard = diffCity.prodStored;
 check("difficulty scales AI economy", prodHard > prodEasy);
 
+api.newGame(1);
+check("tileOwner init neutral", Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 && api.S.tileOwner.every((o) => o === -1));
+
+const bSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+check("foundCity returns true", api.foundCity(bSettler) === true);
+const bc = api.S.cities[0];
+let ringOk = api.getTileOwner()[bc.y * 26 + bc.x] === 0;
+for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
+  const nx = bc.x + dx, ny = bc.y + dy;
+  if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.getTileOwner()[ny * 26 + nx] !== 0) ringOk = false;
+}
+check("new city owns radius 1", ringOk);
+
+bc.pop = 4;
+api.recomputeBorders();
+const own4 = api.getTileOwner();
+const dist2 = [[2,0],[-2,0],[0,2],[0,-2],[2,2],[-2,-2],[2,-2],[-2,2]]
+  .map(([dx, dy]) => [bc.x + dx, bc.y + dy])
+  .filter(([x, y]) => x >= 0 && y >= 0 && x < 26 && y < 18);
+check("pop 4 radius 2", dist2.length > 0 && dist2.every(([x, y]) => own4[y * 26 + x] === 0));
+
+bc.pop = 1;
+bc.culture = 80;
+api.recomputeBorders();
+const ownC = api.getTileOwner();
+const dist3 = [[3,0],[-3,0],[0,3],[0,-3],[3,3],[-3,-3]]
+  .map(([dx, dy]) => [bc.x + dx, bc.y + dy])
+  .filter(([x, y]) => x >= 0 && y >= 0 && x < 26 && y < 18);
+check("culture 80 radius 3", dist3.length > 0 && dist3.every(([x, y]) => ownC[y * 26 + x] === 0));
+check("cityRadius formula", api.cityRadius({ pop: 1, culture: 0 }) === 1 && api.cityRadius({ pop: 10, culture: 500 }) === 4);
+
+api.newGame(1);
+api.foundCity(api.spawn("settler", 0, 5, 5));
+api.foundCity(api.spawn("settler", 1, 7, 5));
+const cityA = api.S.cities.find((c) => c.owner === 0);
+const cityB = api.S.cities.find((c) => c.owner === 1);
+cityB.culture = 80;
+api.recomputeBorders();
+const ownX = api.getTileOwner();
+check("border conflict resolved", ownX[5 * 26 + 5] === 0 && ownX[5 * 26 + 7] === 1 && ownX[4 * 26 + 6] === 1 && ownX[4 * 26 + 4] === 0);
+
+const citiesBefore = api.S.cities.length;
+const p0 = api.spawn("settler", 0, 6, 6);
+const p1 = api.spawn("settler", 1, 4, 5);
+check("foundCity rejected on foreign soil", api.foundCity(p0) === false && api.foundCity(p1) === false);
+check("settler not consumed on reject", api.S.cities.length === citiesBefore && api.S.units.includes(p0) && api.S.units.includes(p1));
+
+cityA.pop = 5;
+cityA.culture = 0;
+for (const [x, y] of [[4,4],[4,5],[4,6],[5,4],[5,6],[5,5]]) api.S.map[y * 26 + x] = 1;
+for (const [x, y] of [[6,4],[6,5],[6,6]]) api.S.map[y * 26 + x] = 3;
+for (let y = 4; y <= 6; y++)
+  for (let x = 4; x <= 6; x++) api.S.res[y * 26 + x] = null;
+const yF = api.cityYields(cityA);
+api.S.cities = api.S.cities.filter((c) => c !== cityB);
+api.recomputeBorders();
+const yU = api.cityYields(cityA);
+check("cityYields filters foreign tiles", yF.food === 12 && yF.prod === 1 && yU.food === 9 && yU.prod === 7);
+
+const store = {};
+globalThis.localStorage = {
+  getItem: (k) => (k in store ? store[k] : null),
+  setItem: (k, v) => { store[k] = v; },
+  removeItem: (k) => { delete store[k]; },
+};
+delete api.S.tileOwner;
+for (const c of api.S.cities) delete c.culture;
+api.save();
+const rawOld = JSON.parse(store["civ1_save"]);
+check("old save serialized without borders", !("tileOwner" in rawOld) && rawOld.cities.every((c) => !("culture" in c)));
+check("old save migrates on load", api.load() === true);
+const ownMig = api.getTileOwner();
+check("migration restores borders", Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 &&
+  api.S.cities.every((c) => c.culture === 0) && api.S.cities.every((c) => ownMig[c.y * 26 + c.x] === c.owner));
+api.save();
+const rawNew = JSON.parse(store["civ1_save"]);
+check("tileOwner serialized as array", Array.isArray(rawNew.tileOwner) && rawNew.tileOwner.length === 26 * 18);
+check("save-load roundtrip borders", api.load() === true && api.getTileOwner().join(",") === rawNew.tileOwner.join(","));
+for (let i = 0; i < 10; i++) api.endTurn();
+check("stable after migration + 10 turns", Array.isArray(api.S.tileOwner) && (api.S.turn === 11 || !!api.S.over));
+
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

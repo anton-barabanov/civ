@@ -158,8 +158,10 @@ export async function createRenderer3D(container, handlers) {
 
   const tileRoot = new THREE.Group();
   const overlayRoot = new THREE.Group();
+  const borderRoot = new THREE.Group();
   scene.add(tileRoot);
   scene.add(overlayRoot);
+  scene.add(borderRoot);
 
   const tilesMap = new Map();
   const oceanGroups = [];
@@ -310,12 +312,70 @@ export async function createRenderer3D(container, handlers) {
     }
   }
 
+  const borderSegs = new Map();
+  const borderMats = new Map();
+  let borderKey = null;
+
+  function borderMat(color) {
+    let m = borderMats.get(color);
+    if (!m) {
+      m = new THREE.LineBasicMaterial({ color });
+      own.mats.push(m);
+      borderMats.set(color, m);
+    }
+    return m;
+  }
+
+  function syncBorders(vm) {
+    let k = "";
+    for (const t of vm.tiles) k += t.explored ? String(t.owner + 2) : "x";
+    if (k === borderKey) return;
+    borderKey = k;
+    const edges = new Map();
+    const topOf = (t) => (t.terrain === 0 ? -0.035 : 0);
+    for (const t of vm.tiles) {
+      if (!t.explored || t.owner < 0 || !vm.players[t.owner]) continue;
+      const x0 = tileX(t.x, vm) - 0.5, x1 = x0 + 1;
+      const z0 = tileZ(t.y, vm) - 0.5, z1 = z0 + 1;
+      const top = topOf(t);
+      let list = edges.get(t.owner);
+      if (!list) { list = []; edges.set(t.owner, list); }
+      const n = t.y > 0 ? vm.tiles[(t.y - 1) * vm.W + t.x] : null;
+      const s = t.y < vm.H - 1 ? vm.tiles[(t.y + 1) * vm.W + t.x] : null;
+      const w = t.x > 0 ? vm.tiles[t.y * vm.W + t.x - 1] : null;
+      const e = t.x < vm.W - 1 ? vm.tiles[t.y * vm.W + t.x + 1] : null;
+      if (!n || n.owner !== t.owner) { const y = Math.max(top, n ? topOf(n) : top) + 0.02; list.push(x0, y, z0, x1, y, z0); }
+      if (!s || s.owner !== t.owner) { const y = Math.max(top, s ? topOf(s) : top) + 0.02; list.push(x0, y, z1, x1, y, z1); }
+      if (!w || w.owner !== t.owner) { const y = Math.max(top, w ? topOf(w) : top) + 0.02; list.push(x0, y, z0, x0, y, z1); }
+      if (!e || e.owner !== t.owner) { const y = Math.max(top, e ? topOf(e) : top) + 0.02; list.push(x1, y, z0, x1, y, z1); }
+    }
+    for (const [, line] of borderSegs) line.visible = edges.has(line.userData.owner);
+    for (const [owner, list] of edges) {
+      let line = borderSegs.get(owner);
+      if (!line) {
+        const g = ownGeo(new THREE.BufferGeometry());
+        g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(vm.W * vm.H * 24), 3));
+        line = new THREE.LineSegments(g, borderMat(vm.players[owner].color));
+        line.userData.owner = owner;
+        line.frustumCulled = false;
+        borderRoot.add(line);
+        borderSegs.set(owner, line);
+      }
+      line.visible = true;
+      const attr = line.geometry.attributes.position;
+      for (let i = 0; i < list.length; i++) attr.array[i] = list[i];
+      attr.needsUpdate = true;
+      line.geometry.setDrawRange(0, list.length / 3);
+    }
+  }
+
   function draw(vm) {
     if (destroyed) return;
     mapW = vm.W;
     mapH = vm.H;
     syncTiles(vm);
     syncEntities(vm);
+    syncBorders(vm);
   }
 
   const clockStart = performance.now();
@@ -348,11 +408,15 @@ export async function createRenderer3D(container, handlers) {
     for (const m of dimCache.values()) m.dispose();
     dimCache.clear();
     ownerMats.clear();
+    borderSegs.clear();
+    borderMats.clear();
+    borderKey = null;
     tilesMap.clear();
     pickMeshes = [];
     oceanGroups.length = 0;
     tileRoot.clear();
     overlayRoot.clear();
+    borderRoot.clear();
     renderer.dispose();
     container.innerHTML = "";
   }
