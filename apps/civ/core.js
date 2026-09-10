@@ -14,13 +14,13 @@ const UNITS = {
   scout: { name: "Разведчик", letter: "Р", icon: "🧭", atk: 1, def: 1, moves: 2, cost: 15, tech: null },
   warrior: { name: "Воин", letter: "В", icon: "⚔️", atk: 2, def: 2, moves: 1, cost: 20, tech: null },
   archer: { name: "Лучник", letter: "Л", icon: "🏹", atk: 3, def: 4, moves: 1, cost: 35, tech: "archery" },
-  swordsman: { name: "Мечник", letter: "М", icon: "🗡️", atk: 5, def: 4, moves: 1, cost: 45, tech: "iron" },
+  swordsman: { name: "Мечник", letter: "М", icon: "🗡️", atk: 5, def: 4, moves: 1, cost: 45, tech: "iron", res: ["iron"] },
   galley: { name: "Галера", letter: "Г", icon: "⛵", atk: 3, def: 2, moves: 3, cost: 35, tech: "sailing", naval: true, capacity: 2 },
   caravel: { name: "Каравелла", letter: "К", icon: "🚢", atk: 5, def: 3, moves: 4, cost: 55, tech: "astronomy", naval: true, capacity: 3 },
   spearman: { name: "Копейщик", letter: "Ц", icon: "🔱", atk: 3, def: 5, moves: 1, cost: 40, tech: "bronze" },
-  horseman: { name: "Всадник", letter: "Вс", icon: "🐎", atk: 5, def: 3, moves: 2, cost: 55, tech: "horsebackriding" },
+  horseman: { name: "Всадник", letter: "Вс", icon: "🐎", atk: 5, def: 3, moves: 2, cost: 55, tech: "horsebackriding", res: ["horses"] },
   catapult: { name: "Катапульта", letter: "Т", icon: "💥", atk: 10, def: 2, moves: 1, cost: 70, tech: "machinery" },
-  knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism" },
+  knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism", res: ["iron", "horses"] },
   musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder" },
 };
 
@@ -83,6 +83,14 @@ const RELIGIONS = {
   oracle: { name: "Учение Оракула", tech: "mysticism", icon: "🔮", color: "#b06bd9" },
   muses: { name: "Культ Муз", tech: "literature", icon: "📜", color: "#3aa88a" },
   sungod: { name: "Вера Ра", tech: "monarchy", icon: "☀", color: "#e8c34a" },
+};
+
+const RESOURCES = {
+  fish: { name: "Рыба", icon: "🐟" },
+  whale: { name: "Кит", icon: "🐋" },
+  iron: { name: "Железо", icon: "⛏", terrains: [TILE.FOREST, TILE.HILLS] },
+  horses: { name: "Лошади", icon: "🐎", terrains: [TILE.GRASS, TILE.PLAINS] },
+  marble: { name: "Мрамор", icon: "🏛", terrains: [TILE.HILLS] },
 };
 
 const REL_SPREAD_RADIUS = 3;
@@ -230,7 +238,34 @@ function scatterResources(map) {
     if (r < 0.10) res[i] = "fish";
     else if (r < 0.13) res[i] = "whale";
   }
+  scatterLandResources(map, res);
   return res;
+}
+
+function scatterLandResources(map, res) {
+  const targets = { iron: 6, horses: 5, marble: 4 };
+  for (const id in targets) {
+    const cand = [];
+    for (let i = 0; i < W * H; i++)
+      if (!res[i] && RESOURCES[id].terrains.includes(map[i])) cand.push(i);
+    for (let j = 0; j < targets[id] && cand.length; j++)
+      res[cand.splice((Math.random() * cand.length) | 0, 1)[0]] = id;
+  }
+  guaranteeLandResources(map, res);
+}
+
+function guaranteeLandResources(map, res) {
+  const cityOn = (i) => S && S.cities && S.cities.some((c) => key(c.x, c.y) === i);
+  const comps = floodComponents(map, isLandTile).filter((c) => c.cells.length >= 25);
+  for (const comp of comps) {
+    for (const id of ["iron", "horses", "marble"]) {
+      if (comp.cells.some((i) => res[i] === id)) continue;
+      let pool = comp.cells.filter((i) => !res[i] && !cityOn(i) && RESOURCES[id].terrains.includes(map[i]));
+      if (!pool.length)
+        pool = comp.cells.filter((i) => !res[i] && !cityOn(i) && map[i] !== TILE.OCEAN && map[i] !== TILE.MOUNTAIN);
+      if (pool.length) res[pool[(Math.random() * pool.length) | 0]] = id;
+    }
+  }
 }
 
 function carveChannel(map) {
@@ -283,9 +318,8 @@ function generateMap() {
     comps.forEach((c) => c.cells.forEach((i) => keep.add(i)));
     for (let i = 0; i < W * H; i++)
       if (map[i] !== TILE.OCEAN && !keep.has(i)) map[i] = TILE.OCEAN;
-    const res = scatterResources(map);
     sprinkleTerrain(map);
-    return { map, res };
+    return { map, res: scatterResources(map) };
   }
   const map = lastMap || new Array(W * H).fill(TILE.GRASS);
   carveChannel(map);
@@ -807,6 +841,42 @@ function techAvailable(p, id) {
   return !p.techs.includes(id) && t.req.every((r) => p.techs.includes(r));
 }
 
+function resourceConnected(pIdx, r) {
+  if (!S.res || !S.tileOwner) return false;
+  for (let i = 0; i < W * H; i++)
+    if (S.res[i] === r && S.tileOwner[i] === pIdx) return true;
+  return false;
+}
+
+function unitAvailable(pIdx, unitId) {
+  const d = UNITS[unitId];
+  if (!d || !S.players[pIdx]) return false;
+  if (d.tech && !S.players[pIdx].techs.includes(d.tech)) return false;
+  if (d.res)
+    for (const r of d.res)
+      if (!resourceConnected(pIdx, r)) return false;
+  return true;
+}
+
+function hasMarble(c) {
+  if (!S.res || !S.tileOwner) return false;
+  const R = cityRadius(c);
+  for (let dy = -R; dy <= R; dy++)
+    for (let dx = -R; dx <= R; dx++) {
+      const nx = c.x + dx, ny = c.y + dy;
+      if (!inMap(nx, ny)) continue;
+      const k = key(nx, ny);
+      if (S.res[k] === "marble" && S.tileOwner[k] === c.owner) return true;
+    }
+  return false;
+}
+
+function wonderCost(c, id) {
+  const d = WONDERS[id];
+  if (!d) return 0;
+  return hasMarble(c) ? Math.floor(d.cost * 0.75) : d.cost;
+}
+
 function processEconomy() {
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
   const strike = new Set();
@@ -835,14 +905,15 @@ function processEconomy() {
     c.prodStored += y.prod * (p.isHuman ? 1 : diff.prodMult);
     if (c.producing) {
       const def = c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : WONDERS[c.producing.id];
-      if (c.prodStored >= def.cost) {
+      const cost = c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : def.cost;
+      if (c.prodStored >= cost) {
         if (c.producing.k === "wonder") {
           const won = S.wonders.find((w) => w.id === c.producing.id);
           if (won) {
             c.prodStored += Math.floor(def.cost / 2);
             addLog(`${def.name} уже построено ${S.players[won.owner].name} — 50% вложений возвращено производству`);
           } else {
-            c.prodStored -= def.cost;
+            c.prodStored -= cost;
             S.wonders.push({ id: c.producing.id, owner: c.owner, cityId: c.id, turn: S.turn });
             addLog(`${S.players[c.owner].name}: в городе ${c.name} построено чудо ${def.name}`);
             if (def.effects.freeTech) {
@@ -917,6 +988,10 @@ function buyForGold(cityId, k, id) {
   if (!def) return { ok: false, reason: "неизвестный элемент" };
   const p = S.players[c.owner];
   if (def.tech && !p.techs.includes(def.tech)) return { ok: false, reason: `нужна технология: ${TECHS[def.tech].name}` };
+  if (k === "unit" && !unitAvailable(c.owner, id)) {
+    const miss = (def.res || []).filter((r) => !resourceConnected(c.owner, r)).map((r) => RESOURCES[r].name).join(", ");
+    return { ok: false, reason: `нужен ресурс в границах: ${miss}` };
+  }
   if (k === "building" && c.buildings.includes(id)) return { ok: false, reason: "здание уже построено" };
   if (c.producing && c.producing.k === k && c.producing.id === id) c.producing = null;
   if (k === "unit" && def.naval && !adjWater(c.x, c.y)) return { ok: false, reason: "нет доступа к воде" };
@@ -952,7 +1027,7 @@ function aiTurnOne(owner) {
       const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
       const myCities = S.cities.filter((x) => x.owner === owner).length;
       const bestUnit = () => ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
-        .find((t) => !UNITS[t].tech || p.techs.includes(UNITS[t].tech));
+        .find((t) => unitAvailable(owner, t));
       const availWonders = Object.keys(WONDERS).filter((id) =>
         (!WONDERS[id].tech || p.techs.includes(WONDERS[id].tech)) &&
         !S.wonders.some((w) => w.id === id));
@@ -977,7 +1052,7 @@ function aiTurnOne(owner) {
   if (own.length) {
     if (fighting) {
       const combat = ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
-        .find((t) => !UNITS[t].tech || p.techs.includes(UNITS[t].tech));
+        .find((t) => unitAvailable(owner, t));
       if (combat) {
         const price = Math.ceil(UNITS[combat].cost * 3);
         if (p.gold >= price + 20) {
@@ -1254,6 +1329,7 @@ function load() {
     if (!raw) return false;
     S = JSON.parse(raw);
     if (!S.res) S.res = new Array(W * H).fill(null);
+    if (!S.res.some((r) => r === "iron" || r === "horses" || r === "marble")) scatterLandResources(S.map, S.res);
     if (!S.waterComp) S.waterComp = computeWaterComps(S.map);
     if (!Array.isArray(S.tileOwner)) S.tileOwner = new Array(W * H).fill(-1);
     if (!Array.isArray(S.players) || S.players.length === 0) return false;
@@ -1292,13 +1368,14 @@ export function getState() { return S; }
 export function getVisible() { return visible; }
 
 export {
-  TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, W, H, TS, SAVE_KEY,
+  TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, RESOURCES, W, H, TS, SAVE_KEY,
   CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
+  unitAvailable, resourceConnected, hasMarble, wonderCost,
 };
 
 export function debugApi() {
@@ -1310,6 +1387,7 @@ export function debugApi() {
     get WONDERS() { return WONDERS; },
     get NATIONS() { return NATIONS; },
     get RELIGIONS() { return RELIGIONS; },
+    get RESOURCES() { return RESOURCES; },
     get CULTURE_WIN_CITIES() { return CULTURE_WIN_CITIES; },
     get CULTURE_WIN_THRESHOLD() { return CULTURE_WIN_THRESHOLD; },
     getNations: () => NATIONS,
@@ -1353,6 +1431,10 @@ export function debugApi() {
     tradeActive,
     recomputeBorders,
     cityRadius,
+    unitAvailable,
+    resourceConnected,
+    hasMarble,
+    wonderCost,
     getTileOwner: () => Array.from(S.tileOwner),
   };
 }

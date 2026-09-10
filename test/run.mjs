@@ -116,6 +116,32 @@ check("4 starting units", api.S.units.length === 4);
 check("exploration started", api.S.explored.some((e) => e === 1));
 check("no cities yet", api.S.cities.length === 0);
 
+{
+  let genBad = null;
+  for (let g = 0; g < 20 && !genBad; g++) {
+    api.newGame(1);
+    const comps = allComps(api.S.map, (t) => t !== 0).filter((c) => c.cells.length >= 25);
+    if (!comps.length) { genBad = "no large continent"; break; }
+    for (const comp of comps)
+      for (const id of ["iron", "horses", "marble"])
+        if (!comp.cells.some((i) => api.S.res[i] === id)) { genBad = `no ${id} on continent of ${comp.cells.length}`; break; }
+    if (genBad) break;
+    for (let i = 0; i < api.S.res.length; i++) {
+      const r = api.S.res[i];
+      if (r !== "iron" && r !== "horses" && r !== "marble") continue;
+      if (api.S.map[i] === 0 || api.S.map[i] === 5) { genBad = "land resource on bad tile"; break; }
+    }
+  }
+  check("land resources guaranteed on every large continent", genBad === null);
+  const bigComps = allComps(api.S.map, (t) => t !== 0).filter((c) => c.cells.length >= 25);
+  const minNeed = Math.max(1, bigComps.length);
+  const cntRes = (id) => api.S.res.filter((r) => r === id).length;
+  check("land resource counts cover all continents", ["iron", "horses", "marble"].every((id) => cntRes(id) >= minNeed) &&
+    ["iron", "horses", "marble"].every((id) => cntRes(id) <= 20));
+  check("RESOURCES table exposed via debugApi", !!api.RESOURCES &&
+    ["iron", "horses", "marble", "fish", "whale"].every((id) => api.RESOURCES[id] && api.RESOURCES[id].name && api.RESOURCES[id].icon));
+}
+
 let coastal = null;
 for (let i = 0; i < api.S.map.length; i++) {
   const x = i % 26, y = (i / 26) | 0;
@@ -1292,6 +1318,91 @@ check("old save without gold migrates to 50", api.load() === true && api.S.playe
 api.S.players[0].gold = 64;
 api.save();
 check("gold survives save-load roundtrip", api.load() === true && api.S.players[0].gold === 64);
+
+check("unit resource requirement data", JSON.stringify(api.UNITS.swordsman.res) === '["iron"]' &&
+  JSON.stringify(api.UNITS.horseman.res) === '["horses"]' &&
+  JSON.stringify(api.UNITS.knight.res) === '["iron","horses"]');
+check("debugApi exposes resource gates", !!api.RESOURCES &&
+  typeof api.unitAvailable === "function" && typeof api.resourceConnected === "function" &&
+  typeof api.hasMarble === "function" && typeof api.wonderCost === "function");
+
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const gateCity = api.S.cities[0];
+for (let i = 0; i < api.S.res.length; i++)
+  if (api.S.res[i] === "iron" || api.S.res[i] === "horses" || api.S.res[i] === "marble") api.S.res[i] = null;
+api.S.players[0].techs.push("masonry", "bronze", "iron", "wheel", "pottery", "horsebackriding", "mysticism", "monarchy", "feudalism", "machinery");
+api.recomputeBorders();
+const ownTiles = [];
+for (let i = 0; i < api.S.tileOwner.length; i++)
+  if (api.S.tileOwner[i] === 0 && i !== gateCity.y * 26 + gateCity.x) ownTiles.push(i);
+check("swordsman locked without iron despite tech", api.unitAvailable(0, "swordsman") === false);
+check("horseman and knight locked without resources", api.unitAvailable(0, "horseman") === false && api.unitAvailable(0, "knight") === false);
+check("units without resource requirement unaffected", api.unitAvailable(0, "warrior") === true && api.unitAvailable(0, "catapult") === true);
+check("tech gate still applies", api.unitAvailable(0, "musketman") === false);
+
+api.S.res[ownTiles[0]] = "iron";
+check("iron inside borders unlocks swordsman", api.resourceConnected(0, "iron") === true && api.unitAvailable(0, "swordsman") === true);
+check("knight still locked with iron only", api.unitAvailable(0, "knight") === false);
+api.S.res[ownTiles[1]] = "horses";
+check("knight unlocked with both resources", api.unitAvailable(0, "knight") === true && api.unitAvailable(0, "horseman") === true);
+
+const gatePair = freeLandPair();
+api.foundCity(api.spawn("settler", 0, gatePair[0][0], gatePair[0][1]));
+const plainCity = api.S.cities.find((x) => x !== gateCity);
+check("wonderCost full price without marble", api.hasMarble(gateCity) === false && api.hasMarble(plainCity) === false &&
+  api.wonderCost(gateCity, "pyramids") === 160 && api.wonderCost(plainCity, "pyramids") === 160);
+plainCity.producing = { k: "wonder", id: "greatwall" };
+plainCity.prodStored = 111;
+api.processEconomy();
+check("wonder not completed below full price without marble", api.S.wonders.length === 0 && plainCity.producing !== null);
+api.S.res[ownTiles[2]] = "marble";
+check("marble in borders cuts wonder cost 25%", api.hasMarble(gateCity) === true &&
+  api.wonderCost(gateCity, "pyramids") === 120 && api.wonderCost(gateCity, "greatwall") === 112);
+plainCity.producing = null;
+gateCity.producing = { k: "wonder", id: "pyramids" };
+gateCity.prodStored = 119;
+api.processEconomy();
+check("marble city completes wonder at discounted cost", api.S.wonders.some((w) => w.id === "pyramids" && w.cityId === gateCity.id));
+
+api.newGame(1);
+const arSet = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+api.foundCity(arSet);
+const arCity = api.S.cities[0];
+for (let i = 0; i < api.S.res.length; i++)
+  if (api.S.res[i] === "iron" || api.S.res[i] === "horses") api.S.res[i] = null;
+api.S.players[1].techs.push("pottery", "bronze", "wheel", "mysticism", "iron", "monarchy", "horsebackriding", "feudalism", "machinery");
+api.spawn("settler", 1, arCity.x, arCity.y);
+arCity.producing = null;
+const arRnd = Math.random;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = arRnd; }
+check("AI does not produce resource-locked units", arCity.producing && arCity.producing.k === "unit" && arCity.producing.id === "catapult");
+const arOwn = [];
+for (let i = 0; i < api.S.tileOwner.length; i++) if (api.S.tileOwner[i] === 1) arOwn.push(i);
+api.S.res[arOwn[0]] = "iron";
+api.S.res[arOwn[1]] = "horses";
+api.spawn("settler", 1, arCity.x, arCity.y);
+arCity.producing = null;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = arRnd; }
+check("AI builds best unit once resources connected", arCity.producing && arCity.producing.k === "unit" && arCity.producing.id === "knight");
+
+api.newGame(1);
+const seaResBefore = api.S.res.filter((r) => r === "fish" || r === "whale").length;
+api.S.res = api.S.res.map((r) => (r === "iron" || r === "horses" || r === "marble") ? null : r);
+api.save();
+check("old save without land resources loads with backfill", api.load() === true &&
+  api.S.res.some((r) => r === "iron") && api.S.res.some((r) => r === "horses") && api.S.res.some((r) => r === "marble"));
+check("backfill preserves sea resources", api.S.res.filter((r) => r === "fish" || r === "whale").length === seaResBefore);
+check("backfilled resources on valid land", api.S.res.every((r, i) =>
+  (r !== "iron" && r !== "horses" && r !== "marble") || (api.S.map[i] !== 0 && api.S.map[i] !== 5)));
+const ironKept = api.S.res.filter((r) => r === "iron").length;
+const horsesKept = api.S.res.filter((r) => r === "horses").length;
+api.save();
+check("load does not double-backfill", api.load() === true &&
+  api.S.res.filter((r) => r === "iron").length === ironKept &&
+  api.S.res.filter((r) => r === "horses").length === horsesKept);
 
 if (!mutation) {
   const expectFail = {

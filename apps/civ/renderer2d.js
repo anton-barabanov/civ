@@ -1,4 +1,4 @@
-import { TILE, TERRAIN, W, H, TS, RELIGIONS, WONDERS } from "./core.js";
+import { TILE, TERRAIN, W, H, TS, RELIGIONS, WONDERS, RESOURCES } from "./core.js";
 
 export function createRenderer2D(container, handlers) {
   const cv = document.createElement("canvas");
@@ -44,10 +44,10 @@ export function createRenderer2D(container, handlers) {
       if (!t.explored) continue;
       ctx.fillStyle = TERRAIN[t.terrain].color;
       ctx.fillRect(t.x * TS, t.y * TS, TS - 1, TS - 1);
-      if (t.terrain === TILE.FOREST) drawGlyph("🌲", t.x, t.y);
+      if (t.terrain === TILE.FOREST && !t.res) drawGlyph("🌲", t.x, t.y);
       if (t.terrain === TILE.MOUNTAIN) drawGlyph("⛰", t.x, t.y);
-      if (t.terrain === TILE.HILLS) drawGlyph("⌃", t.x, t.y, 12);
-      if (t.terrain === TILE.OCEAN && t.res) drawGlyph(t.res === "fish" ? "🐟" : "🐋", t.x, t.y);
+      if (t.terrain === TILE.HILLS && !t.res) drawGlyph("⌃", t.x, t.y, 12);
+      if (t.res && RESOURCES[t.res]) drawGlyph(RESOURCES[t.res].icon, t.x, t.y);
       if (!t.visible) {
         ctx.fillStyle = "rgba(0,0,0,0.45)";
         ctx.fillRect(t.x * TS, t.y * TS, TS - 1, TS - 1);

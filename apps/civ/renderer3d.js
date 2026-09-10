@@ -166,6 +166,7 @@ export async function createRenderer3D(container, handlers) {
   const tilesMap = new Map();
   const oceanGroups = [];
   const dimCache = new Map();
+  const LAND_RES = { iron: 1, horses: 1, marble: 1 };
 
   function dimOf(m) {
     let d = dimCache.get(m);
@@ -207,10 +208,11 @@ export async function createRenderer3D(container, handlers) {
         entry.dimmed = dim;
         for (const k of entry.kids) k.material = dim ? dimOf(k.userData.baseMat) : k.userData.baseMat;
       }
-      const wantRes = entry.ocean && t.res && t.visible;
+      const wantRes = (entry.ocean && t.res && t.visible) ||
+        (!entry.ocean && t.res && LAND_RES[t.res] && t.explored);
       if (wantRes && !entry.resMesh) {
-        entry.resMesh = models.createWaterResourceMesh(t.res);
-        entry.resMesh.position.set(0.22, 0.02, -0.22);
+        entry.resMesh = entry.ocean ? models.createWaterResourceMesh(t.res) : models.createLandResourceMesh(t.res);
+        entry.resMesh.position.set(0.22, entry.ocean ? 0.02 : 0, -0.22);
         entry.group.add(entry.resMesh);
       } else if (!wantRes && entry.resMesh) {
         entry.group.remove(entry.resMesh);

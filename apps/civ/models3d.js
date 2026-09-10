@@ -396,6 +396,29 @@ export function createWaterResourceMesh(kind) {
   return group;
 }
 
+export function createLandResourceMesh(kind) {
+  const group = new THREE.Group();
+  if (kind === "iron") {
+    const rockM = mat(C.rock);
+    add(group, geo("l:iron1", () => new THREE.BoxGeometry(0.17, 0.13, 0.15)), rockM, -0.07, 0.065, 0.03);
+    add(group, geo("l:iron2", () => new THREE.BoxGeometry(0.11, 0.09, 0.11)), rockM, 0.09, 0.045, -0.06);
+    add(group, geo("l:iron3", () => new THREE.BoxGeometry(0.08, 0.06, 0.07)), rockM, 0.02, 0.03, 0.12);
+    add(group, geo("l:ironV1", () => new THREE.BoxGeometry(0.055, 0.05, 0.045)), mat(C.metal), -0.05, 0.14, 0.03);
+    add(group, geo("l:ironV2", () => new THREE.BoxGeometry(0.04, 0.04, 0.04)), mat(C.metal), 0.09, 0.1, -0.04);
+  } else if (kind === "horses") {
+    const horse = new THREE.Group();
+    addHorse(horse);
+    horse.scale.setScalar(0.6);
+    horse.rotation.y = 0.6;
+    group.add(horse);
+  } else {
+    add(group, geo("l:marBase", () => new THREE.CylinderGeometry(0.08, 0.095, 0.04, 8)), mat(C.stone), 0, 0.02, 0);
+    add(group, geo("l:marCol", () => new THREE.CylinderGeometry(0.045, 0.052, 0.27, 8)), mat(C.snow), 0, 0.175, 0);
+    add(group, geo("l:marCap", () => new THREE.CylinderGeometry(0.068, 0.068, 0.035, 8)), mat(C.stone), 0, 0.325, 0);
+  }
+  return group;
+}
+
 export function disposeModels3D() {
   for (const g of geoCache.values()) g.dispose();
   for (const m of matCache.values()) m.dispose();

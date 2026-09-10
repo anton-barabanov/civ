@@ -5,8 +5,9 @@ import {
   playerGoldPerTurn, buyForGold,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf,
-  RELIGIONS, WONDERS, isHolyCity, cityById,
+  RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities,
+  unitAvailable, resourceConnected, hasMarble, wonderCost,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -306,7 +307,14 @@ function showCity(c) {
   const p = S.players[0];
   const unitOpts = Object.entries(UNITS)
     .filter(([, d]) => (!d.tech || p.techs.includes(d.tech)) && (!d.naval || isCoastal(c.x, c.y)))
-    .map(([id, d]) => ({ k: "unit", id, name: d.name, cost: d.cost, info: `⚔${d.atk} 🛡${d.def}${d.naval ? " ⛵" : ""}` }));
+    .map(([id, d]) => {
+      const need = (d.res || []).filter((r) => !resourceConnected(0, r));
+      return {
+        k: "unit", id, name: d.name, cost: d.cost,
+        info: `⚔${d.atk} 🛡${d.def}${d.naval ? " ⛵" : ""}${need.length ? ` · нужен ресурс: ${need.map((r) => `${RESOURCES[r].icon} ${RESOURCES[r].name}`).join(", ")} в границах` : ""}`,
+        ok: !need.length,
+      };
+    });
   const bldOpts = Object.entries(BUILDINGS)
     .filter(([id, d]) => (!d.tech || p.techs.includes(d.tech)) && !c.buildings.includes(id))
     .map(([id, d]) => ({ k: "building", id, name: d.name, cost: d.cost, info: d.desc }));
@@ -314,9 +322,9 @@ function showCity(c) {
     const built = (S.wonders || []).find((w) => w.id === id);
     const techOk = !d.tech || p.techs.includes(d.tech);
     return {
-      k: "wonder", id, name: `${d.icon} ${d.name}`, cost: d.cost,
+      k: "wonder", id, name: `${d.icon} ${d.name}`, cost: wonderCost(c, id),
       info: built ? `${d.desc} · построено: ${S.players[built.owner].name}` :
-        (!techOk ? `${d.desc} · нужна технология: ${TECHS[d.tech].name}` : d.desc),
+        (!techOk ? `${d.desc} · нужна технология: ${TECHS[d.tech].name}` : `${d.desc}${hasMarble(c) ? " · 🏛 Мрамор −25%" : ""}`),
       ok: !built && techOk,
     };
   });
@@ -333,7 +341,7 @@ function showCity(c) {
       <div class="civ-yields">🌾 ${y.food} (еда) · 🔨 ${y.prod} (произв.) · 🔬 ${y.sci} (наука) · 🪙 ${y.gold} (золото)</div>
       ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeGold}🪙</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
-      ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
+      ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
       ${c.buildings.length ? `<div class="civ-yields">Постройки: ${c.buildings.map((b) => BUILDINGS[b].name).join(", ")}</div>` : ""}
       ${c.religion
         ? `<div class="civ-yields">Религия: ${RELIGIONS[c.religion].icon} ${RELIGIONS[c.religion].name}${isHolyCity(c) ? " · святой город" : ""}</div>`
@@ -343,14 +351,15 @@ function showCity(c) {
         ${opts.map((o) => {
           const price = Math.ceil(o.cost * 3);
           const afford = p.gold >= price;
+          const buyBlocked = !afford || o.ok === false;
           return `
           <div style="display:flex;gap:6px;align-items:stretch">
             <button class="civ-prod ${c.producing && c.producing.id === o.id && c.producing.k === o.k ? "sel" : ""}" style="flex:1"
-                    data-k="${o.k}" data-id="${o.id}">
+                    data-k="${o.k}" data-id="${o.id}" ${o.ok === false ? "disabled" : ""}>
               <b>${o.name}</b><span>${o.info}</span><span>🔨 ${o.cost}</span>
             </button>
             <button class="btn text civ-buy" style="width:auto;white-space:nowrap;padding:6px 10px;font-size:12.5px"
-                    data-k="${o.k}" data-id="${o.id}" ${afford ? `title="Купить за ${price}🪙"` : `disabled title="Недостаточно золота: нужно ${price}🪙"`}>Купить 🪙${price}</button>
+                    data-k="${o.k}" data-id="${o.id}" ${buyBlocked ? `disabled title="${o.ok === false ? "нужен ресурс в границах" : `Недостаточно золота: нужно ${price}🪙`}"` : `title="Купить за ${price}🪙"`}>Купить 🪙${price}</button>
           </div>`;
         }).join("")}
       </div>
@@ -376,6 +385,7 @@ function showCity(c) {
   m.querySelectorAll(".civ-prod").forEach((b) => {
     b.onclick = () => {
       if (b.dataset.k === "wonder" && (S.wonders || []).some((w) => w.id === b.dataset.id)) return;
+      if (b.dataset.k === "unit" && !unitAvailable(0, b.dataset.id)) return;
       c.producing = { k: b.dataset.k, id: b.dataset.id };
       save();
       showCity(c);
