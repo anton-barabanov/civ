@@ -116,7 +116,7 @@ check("no cities yet", api.S.cities.length === 0);
 let coastal = null;
 for (let i = 0; i < api.S.map.length; i++) {
   const x = i % 26, y = (i / 26) | 0;
-  if (api.S.map[i] === 0) continue;
+  if (api.S.map[i] === 0 || api.S.map[i] === 5) continue;
   const hasWater = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => {
     const nx = x + dx, ny = y + dy;
     return nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0;
@@ -126,12 +126,16 @@ for (let i = 0; i < api.S.map.length; i++) {
 check("coastal tile found", coastal !== null);
 if (coastal) {
   const w = api.spawn("warrior", 0, coastal[0], coastal[1]);
-  const r = api.reachable(w);
-  const seaCand = [[1,0],[-1,0],[0,1],[0,-1]]
+  const allSea = [[1,0],[-1,0],[0,1],[0,-1]]
     .map(([dx, dy]) => [coastal[0] + dx, coastal[1] + dy])
     .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0);
+  const seaCand = allSea.filter(([nx, ny]) => [[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => {
+    const wx = nx + dx, wy = ny + dy;
+    return wx >= 0 && wy >= 0 && wx < 26 && wy < 18 && api.S.map[wy * 26 + wx] === 0;
+  }));
+  const r = api.reachable(w);
+  check("land unit cannot enter empty water", allSea.length > 0 && ![...r.keys()].some((k) => api.S.map[k] === 0));
   const seaKey = seaCand.length ? seaCand[0][1] * 26 + seaCand[0][0] : -1;
-  check("land unit can embark", seaKey >= 0 && r.has(seaKey));
   if (seaKey >= 0) {
     const galley = api.spawn("galley", 0, seaCand[0][0], seaCand[0][1]);
     const gr = api.reachable(galley);
@@ -145,6 +149,36 @@ if (coastal) {
       }));
     }
     check("galley sails only on water", api.isNaval(galley) && hasSea && !hasLand);
+    check("land unit can board own ship", api.reachable(w).has(seaKey));
+    api.moveUnit(w, seaCand[0][0], seaCand[0][1]);
+    check("unit boards ship", w.x === seaCand[0][0] && w.y === seaCand[0][1]);
+    const w2 = api.spawn("warrior", 0, coastal[0], coastal[1]);
+    api.moveUnit(w2, seaCand[0][0], seaCand[0][1]);
+    check("second unit boards ship", w2.x === seaCand[0][0] && w2.y === seaCand[0][1]);
+    const w3 = api.spawn("warrior", 0, coastal[0], coastal[1]);
+    check("galley capacity 2 rejects third unit", !api.reachable(w3).has(seaKey));
+    const nextSea = [[1,0],[-1,0],[0,1],[0,-1]]
+      .map(([dx, dy]) => [seaCand[0][0] + dx, seaCand[0][1] + dy])
+      .find(([nx, ny]) => nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0);
+    api.moveUnit(galley, nextSea[0], nextSea[1]);
+    check("ship carries passengers", w.x === nextSea[0] && w.y === nextSea[1] && w2.x === nextSea[0] && w2.y === nextSea[1]);
+    api.moveUnit(galley, seaCand[0][0], seaCand[0][1]);
+    w.moves = 1;
+    check("passenger can disembark to shore", api.reachable(w).has(coastal[1] * 26 + coastal[0]));
+    api.moveUnit(w, coastal[0], coastal[1]);
+    check("passenger lands on shore", w.x === coastal[0] && w.y === coastal[1]);
+    const origRandom = Math.random;
+    Math.random = () => 0;
+    try {
+      const killer = api.spawn("catapult", 1, coastal[0], coastal[1]);
+      api.declareWar(0, 1);
+      api.attack(killer, galley.x, galley.y);
+      check("ship death drowns passengers", !api.S.units.includes(galley) && !api.S.units.includes(w2) &&
+        api.S.log.some((l) => l.includes("утонули")));
+    } finally {
+      Math.random = origRandom;
+      api.makePeace(0, 1);
+    }
   }
 }
 
@@ -383,6 +417,15 @@ check("9 new techs added", ["mysticism", "horsebackriding", "monarchy", "feudali
 check("5 new units added", ["spearman", "horseman", "catapult", "knight", "musketman"].every((u) => UT[u] && UT[u].atk > 0 && UT[u].icon && UT[u].cost > 0));
 check("5 new buildings have effects", ["temple", "market", "university", "barracks", "aqueduct"].every((b) => BT[b] && BT[b].effects && BT[b].desc));
 
+const stackUnits = [{ id: 11 }, { id: 12 }, { id: 13 }];
+check("nextInStack cycles through stack",
+  api.nextInStack(stackUnits, 11).id === 12 &&
+  api.nextInStack(stackUnits, 12).id === 13 &&
+  api.nextInStack(stackUnits, 13).id === 11 &&
+  api.nextInStack(stackUnits, 99).id === 11 &&
+  api.nextInStack(stackUnits, null).id === 11 &&
+  api.nextInStack([], 11) === null);
+
 const fxSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
 api.foundCity(fxSettler);
 const fx = api.S.cities.find((c) => c.owner === 0);
@@ -526,9 +569,26 @@ for (let diff = 0; diff <= 2; diff++) {
   check(`stress diff ${diff}: buildings valid`, api.S.cities.every((c) => c.buildings.every((b) => !!BT[b])));
 }
 
+const freeLandPair = () => {
+  for (let j = 0; j < api.S.map.length; j++) {
+    const x = j % 26, y = (j / 26) | 0;
+    if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
+    if (api.S.units.some((u) => Math.abs(u.x - x) <= 1 && Math.abs(u.y - y) <= 1)) continue;
+    if (api.S.cities.some((c) => Math.abs(c.x - x) <= 1 && Math.abs(c.y - y) <= 1)) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
+      if (api.S.map[ny * 26 + nx] === 0 || api.S.map[ny * 26 + nx] === 5) continue;
+      return [[x, y], [nx, ny]];
+    }
+  }
+  return null;
+};
+
 api.newGame(1);
-const obAtt = api.spawn("warrior", 0, 5, 5);
-const obDef = api.spawn("settler", 1, 6, 5);
+const obPair = freeLandPair();
+const obAtt = api.spawn("warrior", 0, obPair[0][0], obPair[0][1]);
+const obDef = api.spawn("settler", 1, obPair[1][0], obPair[1][1]);
 delete obAtt.atkBonus;
 delete obDef.atkBonus;
 api.save();
@@ -544,8 +604,9 @@ api.newGame(1, 3);
 check("peace by default for all pairs", Object.keys(api.S.relations).length === 6 &&
   Object.entries(api.S.relations).every(([, r]) => r.war === false && r.since === -1));
 
-const dAtt = api.spawn("warrior", 0, 5, 5);
-const dDef = api.spawn("settler", 1, 6, 5);
+const dPair = freeLandPair();
+const dAtt = api.spawn("warrior", 0, dPair[0][0], dPair[0][1]);
+const dDef = api.spawn("settler", 1, dPair[1][0], dPair[1][1]);
 dAtt.moves = 1;
 api.attack(dAtt, dDef.x, dDef.y);
 check("attack no-op at peace, move not spent", api.S.units.includes(dAtt) && api.S.units.includes(dDef) && dAtt.moves === 1);

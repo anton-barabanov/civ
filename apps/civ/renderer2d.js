@@ -94,6 +94,12 @@ export function createRenderer2D(container, handlers) {
         ctx.fillText(rd.icon, px + 3, py + 10);
       }
     }
+    const myStack = {};
+    for (const u of vm.units) {
+      if (u.owner !== 0) continue;
+      const k = u.y * vm.W + u.x;
+      myStack[k] = (myStack[k] || 0) + 1;
+    }
     for (const u of vm.units) {
       const cx = u.x * TS + TS / 2;
       const cy = u.y * TS + TS / 2;
@@ -116,6 +122,17 @@ export function createRenderer2D(container, handlers) {
         ctx.fillStyle = "#ffe14d";
         ctx.fill();
       }
+    }
+    ctx.font = "bold 9px sans-serif";
+    for (const k in myStack) {
+      if (myStack[k] < 2) continue;
+      const bx = (k % vm.W) * TS, by = ((k / vm.W) | 0) * TS;
+      const label = "×" + myStack[k];
+      const w = label.length * 6 + 3;
+      ctx.fillStyle = "rgba(0,0,0,0.75)";
+      ctx.fillRect(bx + TS - 2 - w, by + 2, w, 11);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label, bx + TS - 0.5 - w, by + 10);
     }
     for (const r of vm.reach) {
       ctx.fillStyle = "rgba(255,255,255,0.16)";

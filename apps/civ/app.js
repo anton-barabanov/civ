@@ -2,7 +2,7 @@ import {
   TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, W, H,
   key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack,
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
-  computeVision, getState, getVisible,
+  computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf,
   RELIGIONS, isHolyCity, cityById,
 } from "./core.js";
@@ -121,7 +121,7 @@ function onTileClick(x, y) {
   }
   const mine = unitsAt(x, y).filter((u) => u.owner === 0);
   if (mine.length) {
-    S.sel = mine[0].id;
+    S.sel = nextInStack(mine, S.sel).id;
   } else {
     S.sel = null;
     const c = cityAt(x, y);
@@ -148,17 +148,22 @@ function renderTopbar() {
   const el = document.getElementById("civ-top");
   if (!el) return;
   el.innerHTML = `
-    <button class="back" id="civ-home">⌂</button>
-    <h1>Цивилизация · ход ${S.turn}<span class="civ-diff">${(DIFFICULTIES[S.difficulty] || DIFFICULTIES[1]).title}</span></h1>
-    <div class="civ-sci">
-      ${res ? `🔬 ${res.name} ${pct}%` : "🔬 выберите технологию"}
-      <div class="civ-sci-bar"><div style="width:${pct}%"></div></div>
+    <div class="topbar-row">
+      <button class="back" id="civ-home">⌂</button>
+      <h1>Цивилизация · ход ${S.turn}<span class="civ-diff">${(DIFFICULTIES[S.difficulty] || DIFFICULTIES[1]).title}</span></h1>
+      <div class="civ-sci">
+        ${res ? `🔬 ${res.name} ${pct}%` : "🔬 выберите технологию"}
+        <div class="civ-sci-bar"><div style="width:${pct}%"></div></div>
+      </div>
     </div>
-    <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
-    <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
-    <button class="civ-tech-btn" id="civ-religion">Религия</button>
-    <button class="civ-tech-btn" id="civ-tech">Технологии</button>
-    <button class="civ-end" id="civ-end">Конец хода</button>
+    <div class="topbar-row topbar-actions">
+      <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
+      <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
+      <button class="civ-tech-btn" id="civ-religion">Религия</button>
+      <button class="civ-tech-btn" id="civ-tech">Технологии</button>
+      <span class="topbar-spacer"></span>
+      <button class="civ-end" id="civ-end">Конец хода</button>
+    </div>
   `;
   document.getElementById("civ-home").onclick = () => {
     if (hubCtx && hubCtx.back) hubCtx.back();
@@ -176,13 +181,15 @@ function renderPanel() {
   const el = document.getElementById("civ-panel");
   if (!el) return;
   const sel = S.sel ? unitById(S.sel) : null;
-  let body = `<div class="civ-hint">Кликните юнит, затем клетку. Сухопутные юниты могут выходить в море. ПКМ — снять выбор.</div>`;
+  let body = `<div class="civ-hint">Кликните юнит, затем клетку. ПКМ — снять выбор. Сухопутные юниты перевозятся кораблями: шагните на свой корабль для посадки.</div>`;
   if (sel) {
     const u = UNITS[sel.type];
     const t = TERRAIN[S.map[key(sel.x, sel.y)]];
+    const stack = unitsAt(sel.x, sel.y).filter((x) => x.owner === 0);
+    const stackInfo = stack.length > 1 ? ` <span class="civ-terr">Юнит ${stack.findIndex((x) => x.id === sel.id) + 1} из ${stack.length}</span>` : "";
     body = `
       <div class="civ-unit">
-        <b>${u.name}</b> · ⚔${u.atk} 🛡${u.def} · ходов: ${sel.moves}
+        <b>${u.name}</b> · ⚔${u.atk} 🛡${u.def} · ходов: ${sel.moves}${stackInfo}
         <span class="civ-terr">${t.name}${t.def ? ` (+${t.def}% защ.)` : ""}</span>
       </div>`;
     if (sel.type === "settler" && !cityAt(sel.x, sel.y) && TERRAIN[S.map[key(sel.x, sel.y)]].passable) {
