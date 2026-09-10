@@ -30,6 +30,9 @@ const DIFFICULTIES = [
   { key: "hard", title: "Сложно", prodMult: 1.4, sciMult: 1.4, aggroTurn: 8, aggroRange: 8, maxCities: 7, settlerChance: 0.8 },
 ];
 
+const PEACE_WAR_LEN = 10;
+const PEACE_STRENGTH = 0.6;
+
 const BUILDINGS = {
   granary: { name: "Амбар", cost: 40, tech: "pottery", desc: "+2 еды", effects: { foodFlat: 2 } },
   library: { name: "Библиотека", cost: 50, tech: "writing", desc: "+50% науки", effects: { sciMult: 1.5 } },
@@ -374,7 +377,11 @@ function newGame(diff = 1, opponents = 1) {
     log: ["Игра началась. Основайте город поселенцем."],
     over: null,
     sel: null,
+    relations: {},
   };
+  for (let i = 0; i < S.players.length; i++)
+    for (let j = i + 1; j < S.players.length; j++)
+      S.relations[relKey(i, j)] = { war: false, since: -1 };
   const g = generateMap();
   S.map = g.map;
   S.res = g.res;
@@ -441,9 +448,13 @@ function reachable(u) {
       const k = key(nx, ny);
       if (seen.has(k)) continue;
       if (!canEnter(u, nx, ny)) continue;
-      const enemyHere = unitsAt(nx, ny).some((o) => o.owner !== u.owner) ||
-        (cityAt(nx, ny) && cityAt(nx, ny).owner !== u.owner);
-      if (enemyHere) { res.set(k, 0); continue; }
+      const other = unitsAt(nx, ny).find((o) => o.owner !== u.owner) || null;
+      const city = cityAt(nx, ny);
+      const foe = other ? other.owner : (city && city.owner !== u.owner ? city.owner : null);
+      if (foe !== null) {
+        if (atWar(u.owner, foe)) res.set(k, 0);
+        continue;
+      }
       seen.add(k);
       res.set(k, m - 1);
       q.push([nx, ny, m - 1]);
@@ -454,6 +465,8 @@ function reachable(u) {
 }
 
 function moveUnit(u, x, y) {
+  const oc = cityAt(x, y);
+  if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner)) return;
   u.x = x;
   u.y = y;
   u.moves = 0;
@@ -480,6 +493,11 @@ function attack(att, x, y) {
   const defs = unitsAt(x, y).filter((u) => u.owner !== att.owner);
   const city = cityAt(x, y);
   const def = defs[0];
+  const foe = def ? def.owner : (city && city.owner !== att.owner ? city.owner : null);
+  if (foe !== null && !atWar(att.owner, foe)) {
+    if (att.owner === 0) addLog(`Мы не воюем с ${S.players[foe].name}`);
+    return;
+  }
   if (!def) return;
   if (isNaval(att) && S.map[key(x, y)] !== TILE.OCEAN) return;
   const A = UNITS[att.type].atk + (att.atkBonus || 0);
@@ -767,12 +785,12 @@ function aiTurnOne(owner) {
     let target = null;
     let bestD = 99;
     for (const e of S.units) {
-      if (e.owner === owner) continue;
+      if (e.owner === owner || !atWar(owner, e.owner)) continue;
       const d = dist(u.x, u.y, e.x, e.y);
       if (d < bestD && d <= diff.aggroRange) { bestD = d; target = [e.x, e.y]; }
     }
     for (const c of S.cities) {
-      if (c.owner === owner) continue;
+      if (c.owner === owner || !atWar(owner, c.owner)) continue;
       const d = dist(u.x, u.y, c.x, c.y);
       if (d < bestD && d <= diff.aggroRange) { bestD = d; target = [c.x, c.y]; }
     }
@@ -788,7 +806,7 @@ function aiTurnOne(owner) {
     if (!target && S.turn > diff.aggroTurn) {
       let bd = Infinity;
       for (const c of S.cities) {
-        if (c.owner === owner) continue;
+        if (c.owner === owner || !atWar(owner, c.owner)) continue;
         const d = dist(u.x, u.y, c.x, c.y);
         if (d < bd) { bd = d; target = [c.x, c.y]; }
       }
@@ -829,6 +847,90 @@ function stepToward(u, tx, ty) {
   u.y = ny;
 }
 
+function relKey(i, j) { return i < j ? `${i}:${j}` : `${j}:${i}`; }
+
+function atWar(i, j) {
+  const r = S.relations && S.relations[relKey(i, j)];
+  return !!(r && r.war);
+}
+
+function declareWar(i, j) {
+  const r = S.relations[relKey(i, j)];
+  if (!r || r.war) return;
+  r.war = true;
+  r.since = S.turn;
+  addLog(`${S.players[i].name} объявляет войну ${S.players[j].name}`);
+}
+
+function makePeace(i, j) {
+  const r = S.relations[relKey(i, j)];
+  if (!r || !r.war) return;
+  r.war = false;
+  r.since = -1;
+  addLog(`${S.players[i].name} и ${S.players[j].name} заключают мир`);
+}
+
+function strengthOf(i) {
+  let s = 0;
+  for (const u of S.units) if (u.owner === i) s += UNITS[u.type].atk;
+  for (const c of S.cities) if (c.owner === i) s += c.pop;
+  return s;
+}
+
+function readyForPeace(weak, strong) {
+  const r = S.relations[relKey(weak, strong)];
+  return !!r && r.war && S.turn - r.since > PEACE_WAR_LEN &&
+    strengthOf(weak) < PEACE_STRENGTH * strengthOf(strong);
+}
+
+function offerPeace(humanIdx, aiIdx) {
+  if (readyForPeace(aiIdx, humanIdx)) {
+    makePeace(humanIdx, aiIdx);
+    return true;
+  }
+  addLog(`${S.players[aiIdx].name} отвергают предложение мира`);
+  return false;
+}
+
+function aiDiplomacy() {
+  const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  const pts = (i) => [
+    ...S.units.filter((u) => u.owner === i).map((u) => [u.x, u.y]),
+    ...S.cities.filter((c) => c.owner === i).map((c) => [c.x, c.y]),
+  ];
+  for (let i = 1; i < S.players.length; i++) {
+    let fighting = false;
+    for (let j = 0; j < S.players.length; j++)
+      if (j !== i && atWar(i, j)) fighting = true;
+    if (fighting || S.turn < diff.aggroTurn) continue;
+    const mine = pts(i);
+    if (!mine.length) continue;
+    let target = -1;
+    let bd = Infinity;
+    for (let j = 0; j < S.players.length; j++) {
+      if (j === i) continue;
+      const theirs = pts(j);
+      let dmin = Infinity;
+      for (const [ax, ay] of mine)
+        for (const [bx, by] of theirs) {
+          const d = dist(ax, ay, bx, by);
+          if (d < dmin) dmin = d;
+        }
+      if (dmin < bd) { bd = dmin; target = j; }
+    }
+    if (target === -1) continue;
+    const si = strengthOf(i);
+    const sj = strengthOf(target);
+    if (sj > 0 && si > sj && Math.random() < Math.min(0.5, 0.05 + 0.25 * (si / sj - 1)))
+      declareWar(i, target);
+  }
+  for (let a = 1; a < S.players.length; a++)
+    for (let b = a + 1; b < S.players.length; b++)
+      if (atWar(a, b) && (readyForPeace(a, b) || readyForPeace(b, a))) makePeace(a, b);
+  for (let j = 1; j < S.players.length; j++)
+    if (atWar(0, j) && readyForPeace(j, 0)) addLog(`${S.players[j].name} готовы к миру`);
+}
+
 function playerAlive(idx) {
   return S.cities.some((c) => c.owner === idx) ||
     S.units.some((u) => u.owner === idx && u.type === "settler");
@@ -850,6 +952,7 @@ function checkVictory() {
 
 function endTurn() {
   if (S.over) return;
+  aiDiplomacy();
   aiTurn();
   processEconomy();
   S.turn++;
@@ -871,6 +974,12 @@ function load() {
     if (!S.waterComp) S.waterComp = computeWaterComps(S.map);
     if (!Array.isArray(S.tileOwner)) S.tileOwner = new Array(W * H).fill(-1);
     if (!Array.isArray(S.players) || S.players.length === 0) return false;
+    if (!S.relations || typeof S.relations !== "object") {
+      S.relations = {};
+      for (let i = 0; i < S.players.length; i++)
+        for (let j = i + 1; j < S.players.length; j++)
+          S.relations[relKey(i, j)] = { war: false, since: -1 };
+    }
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
     S.players.forEach((p, i) => {
       p.isHuman = i === 0;
@@ -896,6 +1005,7 @@ export {
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity,
   cityYields, techAvailable, processEconomy, endTurn, save, load,
+  relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
 };
 
 export function debugApi() {
@@ -910,10 +1020,18 @@ export function debugApi() {
     endTurn,
     aiTurn,
     aiTurnOne,
+    aiDiplomacy,
+    relKey,
+    atWar,
+    declareWar,
+    makePeace,
+    offerPeace,
+    strengthOf,
     findStarts,
     playerAlive,
     foundCity,
     attack,
+    moveUnit,
     spawn,
     save,
     load,

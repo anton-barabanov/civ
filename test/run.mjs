@@ -194,6 +194,7 @@ if (city) {
 const w1 = api.S.units.find((u) => u.owner === 0 && u.type === "warrior");
 const enemy = api.spawn("settler", 1, w1.x + 1, w1.y);
 w1.moves = 1;
+api.declareWar(0, 1);
 api.attack(w1, enemy.x, enemy.y);
 check("combat resolved", !api.S.units.includes(enemy) || !api.S.units.includes(w1));
 
@@ -535,8 +536,76 @@ check("old save loaded with bonusless units", api.load() === true && api.S.units
 const ldAtt = api.S.units.find((u) => u.id === obAtt.id);
 const ldDef = api.S.units.find((u) => u.id === obDef.id);
 ldAtt.moves = 1;
+api.declareWar(0, 1);
 api.attack(ldAtt, ldDef.x, ldDef.y);
 check("combat works after old-save load", !(api.S.units.some((u) => u.id === obAtt.id) && api.S.units.some((u) => u.id === obDef.id)));
+
+api.newGame(1, 3);
+check("peace by default for all pairs", Object.keys(api.S.relations).length === 6 &&
+  Object.entries(api.S.relations).every(([, r]) => r.war === false && r.since === -1));
+
+const dAtt = api.spawn("warrior", 0, 5, 5);
+const dDef = api.spawn("settler", 1, 6, 5);
+dAtt.moves = 1;
+api.attack(dAtt, dDef.x, dDef.y);
+check("attack no-op at peace, move not spent", api.S.units.includes(dAtt) && api.S.units.includes(dDef) && dAtt.moves === 1);
+api.declareWar(0, 1);
+check("declareWar flags war since current turn", api.atWar(0, 1) &&
+  api.S.relations["0:1"].war === true && api.S.relations["0:1"].since === api.S.turn);
+dAtt.moves = 1;
+api.attack(dAtt, dDef.x, dDef.y);
+check("attack resolves after declareWar", !api.S.units.includes(dAtt) || !api.S.units.includes(dDef));
+api.makePeace(0, 1);
+check("makePeace restores peace", !api.atWar(0, 1) && api.S.relations["0:1"].since === -1);
+
+api.newGame(1);
+let capSpot = null;
+for (let j = 0; j < api.S.map.length && !capSpot; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (x < 25 && api.S.map[j] !== 0 && api.S.map[j] !== 5) capSpot = [x, y];
+}
+api.foundCity(api.spawn("settler", 1, capSpot[0], capSpot[1]));
+const capCity = api.S.cities[0];
+const capUnit = api.spawn("warrior", 0, capSpot[0] + 1, capSpot[1]);
+capUnit.moves = 1;
+check("enemy city not in reachable at peace", !api.reachable(capUnit).has(capSpot[1] * 26 + capSpot[0]));
+api.moveUnit(capUnit, capSpot[0], capSpot[1]);
+check("city capture impossible at peace", capUnit.x === capSpot[0] + 1 && capUnit.moves === 1 && capCity.owner === 1);
+api.declareWar(0, 1);
+api.moveUnit(capUnit, capSpot[0], capSpot[1]);
+check("city capture works at war", capCity.owner === 0);
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner !== 1);
+let weakSpot = null;
+for (let j = 0; j < api.S.map.length && !weakSpot; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (api.S.map[j] !== 0 && api.S.map[j] !== 5) weakSpot = [x, y];
+}
+api.foundCity(api.spawn("settler", 1, weakSpot[0], weakSpot[1]));
+api.declareWar(0, 1);
+const weakRel = api.S.relations["0:1"];
+weakRel.since = api.S.turn - 3;
+check("AI refuses peace early in war", api.offerPeace(0, 1) === false && api.atWar(0, 1));
+weakRel.since = api.S.turn - 11;
+api.S.cities[0].pop = 10;
+check("AI refuses peace when strong", api.offerPeace(0, 1) === false && api.atWar(0, 1));
+api.S.cities[0].pop = 1;
+check("AI accepts peace when weak after long war", api.offerPeace(0, 1) === true && !api.atWar(0, 1));
+
+api.newGame(1, 2);
+api.declareWar(1, 2);
+api.S.relations["1:2"].since = api.S.turn - 11;
+api.S.units = api.S.units.filter((u) => u.owner !== 2);
+api.endTurn();
+check("AI-AI peace concluded via endTurn", !api.atWar(1, 2));
+
+api.newGame(1, 2);
+delete api.S.relations;
+api.save();
+check("old save without relations migrates to peace", api.load() === true &&
+  Object.keys(api.S.relations).length === 3 &&
+  Object.values(api.S.relations).every((r) => r.war === false && r.since === -1));
 
 if (!mutation) {
   const expectFail = { a: "FAIL granary +2 food", b: "FAIL processEconomy updates borders after growth" };

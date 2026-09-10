@@ -3,6 +3,7 @@ import {
   key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack,
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   computeVision, getState, getVisible,
+  relKey, atWar, declareWar, offerPeace, strengthOf,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -153,6 +154,7 @@ function renderTopbar() {
       <div class="civ-sci-bar"><div style="width:${pct}%"></div></div>
     </div>
     <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
+    <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
     <button class="civ-tech-btn" id="civ-tech">Технологии</button>
     <button class="civ-end" id="civ-end">Конец хода</button>
   `;
@@ -161,6 +163,7 @@ function renderTopbar() {
     else showStart(true);
   };
   document.getElementById("civ-render-toggle").onclick = () => swapRenderer(rendererMode === "3d" ? "2d" : "3d");
+  document.getElementById("civ-diplo").onclick = showDiplo;
   document.getElementById("civ-tech").onclick = showTech;
   document.getElementById("civ-end").onclick = () => { endTurn(); refresh(); };
 }
@@ -331,6 +334,55 @@ function showTech() {
       if (p.researching !== id) { p.researching = id; p.progress = 0; }
       save();
       showTech();
+      refresh();
+    };
+  });
+}
+
+function showDiplo() {
+  closeModal();
+  const S = getState();
+  const m = document.createElement("div");
+  m.className = "civ-modal";
+  m.id = "civ-modal";
+  m.innerHTML = `
+    <div class="civ-dialog civ-techs">
+      <h2>🤝 Дипломатия</h2>
+      <div class="civ-prod-list">
+        ${S.players.slice(1).map((p, idx) => {
+          const i = idx + 1;
+          const rel = (S.relations || {})[relKey(0, i)] || { war: false, since: -1 };
+          const status = rel.war ? `⚔ война с хода ${rel.since}` : "🕊 мир";
+          return `<div class="civ-prod">
+            <b><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${p.color};margin-right:6px;vertical-align:middle"></span>${escapeHtml(p.name)}</b>
+            <span>${status} · сила: ${strengthOf(i)}</span>
+            <span>
+              <button class="btn text" data-war="${i}" ${rel.war ? "disabled" : ""}>Объявить войну</button>
+              <button class="btn text" data-peace="${i}" ${rel.war ? "" : "disabled"}>Предложить мир</button>
+            </span>
+          </div>`;
+        }).join("")}
+      </div>
+      <button class="btn text" id="civ-close">Закрыть</button>
+    </div>
+  `;
+  rootEl.appendChild(m);
+  document.getElementById("civ-close").onclick = closeModal;
+  m.querySelectorAll("[data-war]").forEach((b) => {
+    b.onclick = () => {
+      const i = Number(b.dataset.war);
+      if (atWar(0, i)) return;
+      declareWar(0, i);
+      save();
+      showDiplo();
+      refresh();
+    };
+  });
+  m.querySelectorAll("[data-peace]").forEach((b) => {
+    b.onclick = () => {
+      offerPeace(0, Number(b.dataset.peace));
+      save();
+      showDiplo();
       refresh();
     };
   });
