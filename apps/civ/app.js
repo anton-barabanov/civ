@@ -11,6 +11,54 @@ export { debugApi } from "./core.js";
 let rootEl = null;
 let hubCtx = null;
 let renderer = null;
+let rendererMode = "2d";
+let rendererGen = 0;
+
+function initialRendererMode() {
+  if (typeof location === "undefined") return "2d";
+  try {
+    const q = new URLSearchParams(location.search).get("renderer");
+    if (q === "3d" || q === "2d") return q;
+    const saved = localStorage.getItem("civ_renderer");
+    if (saved === "3d" || saved === "2d") return saved;
+  } catch (e) {}
+  return "2d";
+}
+
+function persistRenderer(mode) {
+  rendererMode = mode;
+  if (typeof localStorage !== "undefined") {
+    try { localStorage.setItem("civ_renderer", mode); } catch (e) {}
+  }
+}
+
+async function swapRenderer(mode) {
+  const gen = ++rendererGen;
+  const mapEl = document.getElementById("civ-map");
+  if (!mapEl) return;
+  if (renderer) { renderer.destroy(); renderer = null; }
+  mapEl.innerHTML = "";
+  let next = null;
+  if (mode === "3d") {
+    try {
+      const mod = await import("./renderer3d.js");
+      next = await mod.createRenderer3D(mapEl, { onTileClick, onTileRightClick });
+    } catch (e) {
+      console.log("3D недоступно, включён 2D", e);
+      const S = getState();
+      if (S.log) { S.log.unshift("3D недоступно, включён 2D"); if (S.log.length > 30) S.log.length = 30; }
+      mode = "2d";
+    }
+  }
+  if (gen !== rendererGen) {
+    if (next) next.destroy();
+    return;
+  }
+  if (!next) next = createRenderer2D(mapEl, { onTileClick, onTileRightClick });
+  persistRenderer(mode);
+  renderer = next;
+  refresh();
+}
 
 function buildViewModel() {
   const S = getState();
@@ -104,6 +152,7 @@ function renderTopbar() {
       ${res ? `🔬 ${res.name} ${pct}%` : "🔬 выберите технологию"}
       <div class="civ-sci-bar"><div style="width:${pct}%"></div></div>
     </div>
+    <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
     <button class="civ-tech-btn" id="civ-tech">Технологии</button>
     <button class="civ-end" id="civ-end">Конец хода</button>
   `;
@@ -111,6 +160,7 @@ function renderTopbar() {
     if (hubCtx && hubCtx.back) hubCtx.back();
     else showStart(true);
   };
+  document.getElementById("civ-render-toggle").onclick = () => swapRenderer(rendererMode === "3d" ? "2d" : "3d");
   document.getElementById("civ-tech").onclick = showTech;
   document.getElementById("civ-end").onclick = () => { endTurn(); refresh(); };
 }
@@ -168,7 +218,7 @@ function renderPanel() {
 function refresh() {
   renderTopbar();
   renderPanel();
-  renderer.draw(buildViewModel());
+  if (renderer) renderer.draw(buildViewModel());
   renderOver();
 }
 
@@ -335,10 +385,11 @@ export const civApp = {
       <div class="civ-map-wrap" id="civ-map"></div>
       <div id="civ-panel" class="civ-panel"></div>
     `;
-    renderer = createRenderer2D(document.getElementById("civ-map"), {
-      onTileClick,
-      onTileRightClick,
-    });
+    rendererGen++;
+    rendererMode = initialRendererMode();
+    renderer = null;
+    if (rendererMode === "3d") swapRenderer("3d");
+    else renderer = createRenderer2D(document.getElementById("civ-map"), { onTileClick, onTileRightClick });
     if (!hadSave) newGame();
     computeVision();
     refresh();
@@ -349,7 +400,8 @@ export const civApp = {
       if (ov) ov.remove();
       const st = document.getElementById("civ-start");
       if (st) st.remove();
-      renderer.destroy();
+      rendererGen++;
+      if (renderer) renderer.destroy();
       renderer = null;
       rootEl = null;
       hubCtx = null;
