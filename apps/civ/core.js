@@ -39,7 +39,7 @@ const BUILDINGS = {
   walls: { name: "Стены", cost: 40, tech: "masonry", desc: "+50% защиты города", effects: { defMult: 1.5 } },
   forge: { name: "Кузница", cost: 55, tech: "bronze", desc: "+2 производства", effects: { prodFlat: 2 } },
   temple: { name: "Храм", cost: 50, tech: "mysticism", desc: "+2 культуры", effects: { culture: 2 } },
-  market: { name: "Рынок", cost: 55, tech: "currency", desc: "Удваивает бонус морской торговли", effects: { tradeMult: 2 } },
+  market: { name: "Рынок", cost: 55, tech: "currency", desc: "Удваивает золотой доход от морской торговли", effects: { tradeMult: 2 } },
   university: { name: "Университет", cost: 80, tech: "education", desc: "+3 науки, +1 культуры", effects: { sciFlat: 3, culture: 1 } },
   barracks: { name: "Казармы", cost: 45, tech: "iron", desc: "+1 атаки юнитам, созданным в городе", effects: { unitAtk: 1 } },
   aqueduct: { name: "Акведук", cost: 60, tech: "engineering", desc: "+3 к пределу населения", effects: { maxPop: 3 } },
@@ -48,7 +48,7 @@ const BUILDINGS = {
 const WONDERS = {
   pyramids: { name: "Пирамиды", icon: "🔺", cost: 160, tech: "masonry", desc: "+2 производства во всех городах", effects: { prodFlat: 2 } },
   greatlibrary: { name: "Великая библиотека", icon: "📚", cost: 180, tech: "literature", desc: "+50% науки во всех городах", effects: { sciMult: 1.5 } },
-  colossus: { name: "Колосс", icon: "🗿", cost: 160, tech: "currency", desc: "Удваивает бонус морской торговли во всех городах", effects: { tradeMult: 2 } },
+  colossus: { name: "Колосс", icon: "🗿", cost: 160, tech: "currency", desc: "Удваивает золотой доход от морской торговли во всех городах", effects: { tradeMult: 2 } },
   greatwall: { name: "Великая стена", icon: "🧱", cost: 150, tech: "construction", desc: "+50% защиты всех городов", effects: { defMult: 1.5 } },
   oraclew: { name: "Оракул", icon: "✨", cost: 130, tech: "mysticism", desc: "Бесплатная технология при завершении", effects: { freeTech: 1 } },
 };
@@ -408,6 +408,7 @@ function newGame(diff = 1, opponents = 1) {
       techs: [],
       researching: null,
       progress: 0,
+      gold: 50,
       isHuman: i === 0,
     })),
     units: [],
@@ -787,8 +788,18 @@ function cityYields(c) {
   prod += e.prodFlat + pe.prodFlat;
   let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat + (isHolyCity(c) ? 2 : 0);
   sci = Math.round(sci * e.sciMult * pe.sciMult);
-  if (tradeActive(c)) { prod += 2 * e.tradeMult * pe.tradeMult; sci += 1 * e.tradeMult * pe.tradeMult; }
-  return { food, prod, sci, trade: tradeActive(c), tradeProd: tradeActive(c) ? 2 * e.tradeMult * pe.tradeMult : 0, tradeSci: tradeActive(c) ? e.tradeMult * pe.tradeMult : 0 };
+  const trade = tradeActive(c);
+  const tradeGold = trade ? 2 * e.tradeMult * pe.tradeMult : 0;
+  const gold = 2 + Math.floor(c.pop / 2) + tradeGold;
+  return { food, prod, sci, gold, trade, tradeGold };
+}
+
+function playerGoldPerTurn(i) {
+  const cities = S.cities.filter((c) => c.owner === i);
+  let income = 0;
+  for (const c of cities) income += cityYields(c).gold;
+  const upkeep = cities.length * 2 + S.units.filter((u) => u.owner === i).length;
+  return { income, upkeep, net: income - upkeep };
 }
 
 function techAvailable(p, id) {
@@ -798,6 +809,16 @@ function techAvailable(p, id) {
 
 function processEconomy() {
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  const strike = new Set();
+  for (let i = 0; i < S.players.length; i++) {
+    const p = S.players[i];
+    const g = playerGoldPerTurn(i);
+    p.gold = Math.max(0, p.gold + g.net);
+    if (p.gold === 0 && g.net < 0) {
+      strike.add(i);
+      if (i === 0) addLog(`Казна пуста: наука остановлена (дефицит −${-g.net}🪙)`);
+    }
+  }
   for (const c of S.cities) {
     const p = S.players[c.owner];
     const y = cityYields(c);
@@ -869,7 +890,7 @@ function processEconomy() {
         p.progress = 0;
       }
     }
-    if (p.researching) {
+    if (p.researching && !strike.has(c.owner)) {
       p.progress += y.sci * (p.isHuman ? 1 : diff.sciMult);
       if (p.progress >= TECHS[p.researching].cost) {
         const done = p.researching;
@@ -886,6 +907,37 @@ function processEconomy() {
   for (const u of S.units) u.moves = UNITS[u.type].moves;
   checkFoundReligions();
   spreadReligions();
+}
+
+function buyForGold(cityId, k, id) {
+  const c = cityById(cityId);
+  if (!c) return { ok: false, reason: "город не найден" };
+  if (k === "wonder") return { ok: false, reason: "чудеса нельзя купить за золото" };
+  const def = k === "unit" ? UNITS[id] : k === "building" ? BUILDINGS[id] : null;
+  if (!def) return { ok: false, reason: "неизвестный элемент" };
+  const p = S.players[c.owner];
+  if (def.tech && !p.techs.includes(def.tech)) return { ok: false, reason: `нужна технология: ${TECHS[def.tech].name}` };
+  if (k === "building" && c.buildings.includes(id)) return { ok: false, reason: "здание уже построено" };
+  if (c.producing && c.producing.k === k && c.producing.id === id) c.producing = null;
+  if (k === "unit" && def.naval && !adjWater(c.x, c.y)) return { ok: false, reason: "нет доступа к воде" };
+  const price = Math.ceil(def.cost * 3);
+  if (p.gold < price) return { ok: false, reason: "недостаточно золота" };
+  p.gold -= price;
+  if (k === "unit") {
+    let born;
+    if (def.naval) {
+      const w = adjWater(c.x, c.y);
+      born = spawn(id, c.owner, w[0], w[1]);
+    } else {
+      born = spawn(id, c.owner, c.x, c.y);
+    }
+    born.atkBonus = buildingEffects(c).unitAtk;
+    if (c.owner === 0) addLog(`${c.name}: за ${price}🪙 нанят ${def.name}`);
+  } else {
+    c.buildings.push(id);
+    if (c.owner === 0) addLog(`${c.name}: за ${price}🪙 построена ${def.name}`);
+  }
+  return { ok: true };
 }
 
 function aiTurn() {
@@ -917,6 +969,37 @@ function aiTurnOne(owner) {
           : { k: "unit", id: bestUnit() };
       } else {
         c.producing = { k: "unit", id: bestUnit() };
+      }
+    }
+  }
+  const own = S.cities.filter((x) => x.owner === owner);
+  const fighting = S.players.some((_, i) => i !== owner && atWar(owner, i));
+  if (own.length) {
+    if (fighting) {
+      const combat = ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+        .find((t) => !UNITS[t].tech || p.techs.includes(UNITS[t].tech));
+      if (combat) {
+        const price = Math.ceil(UNITS[combat].cost * 3);
+        if (p.gold >= price + 20) {
+          const foes = [];
+          for (const u of S.units) if (atWar(owner, u.owner)) foes.push([u.x, u.y]);
+          for (const ct of S.cities) if (atWar(owner, ct.owner)) foes.push([ct.x, ct.y]);
+          let target = own[0], bd = Infinity;
+          for (const ct of own)
+            for (const [fx, fy] of foes) {
+              const d = dist(ct.x, ct.y, fx, fy);
+              if (d < bd) { bd = d; target = ct; }
+            }
+          buyForGold(target.id, "unit", combat);
+        }
+      }
+    } else {
+      for (const b of ["market", "library"]) {
+        if (!p.techs.includes(BUILDINGS[b].tech)) continue;
+        const price = Math.ceil(BUILDINGS[b].cost * 3);
+        if (p.gold < price + 50) continue;
+        const t = own.find((ct) => !ct.buildings.includes(b));
+        if (t && buyForGold(t.id, "building", b).ok) break;
       }
     }
   }
@@ -1193,6 +1276,7 @@ function load() {
       if (!Array.isArray(p.techs)) p.techs = [];
       if (!("researching" in p)) p.researching = null;
       if (typeof p.progress !== "number") p.progress = 0;
+      if (typeof p.gold !== "number") p.gold = 50;
       if (!Array.isArray(p.cityNames)) {
         const nat = NATIONS.find((n) => n.name === p.name);
         const taken = new Set(S.cities.filter((c) => c.owner === i).map((c) => c.name));
@@ -1212,7 +1296,7 @@ export {
   CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
-  cityYields, techAvailable, processEconomy, endTurn, save, load, legendaryCities,
+  cityYields, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
 };
@@ -1253,6 +1337,8 @@ export function debugApi() {
     load,
     computeVision,
     processEconomy,
+    playerGoldPerTurn,
+    buyForGold,
     foundReligion,
     checkFoundReligions,
     spreadReligions,

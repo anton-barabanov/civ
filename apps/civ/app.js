@@ -2,6 +2,7 @@ import {
   TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, W, H,
   key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack,
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
+  playerGoldPerTurn, buyForGold,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf,
   RELIGIONS, WONDERS, isHolyCity, cityById,
@@ -150,6 +151,9 @@ function renderTopbar() {
   const p = S.players[0];
   const res = p.researching ? TECHS[p.researching] : null;
   const pct = res ? Math.min(100, Math.round((p.progress / res.cost) * 100)) : 0;
+  const gold = playerGoldPerTurn(0);
+  const goldStrike = p.gold === 0 && gold.net < 0;
+  const netStr = `${gold.net >= 0 ? "+" : ""}${gold.net}`;
   const el = document.getElementById("civ-top");
   if (!el) return;
   el.innerHTML = `
@@ -160,6 +164,7 @@ function renderTopbar() {
         ${res ? `🔬 ${res.name} ${pct}%` : "🔬 выберите технологию"}
         <div class="civ-sci-bar"><div style="width:${pct}%"></div></div>
       </div>
+      <div class="civ-sci civ-gold" title="Золото: доход ${gold.income}🪙 − содержание ${gold.upkeep}🪙 = ${netStr}🪙 за ход">🪙 ${p.gold} (${netStr})${goldStrike ? ` <span class="civ-warn">⚠ наука остановлена</span>` : ""}</div>
       <div class="civ-cult" title="Легендарные города: ${legendaryCities(0).length} из ${CULTURE_WIN_CITIES}">🏛 ${legendaryCities(0).length}/${CULTURE_WIN_CITIES}</div>
     </div>
     <div class="topbar-row topbar-actions">
@@ -325,8 +330,8 @@ function showCity(c) {
   m.innerHTML = `
     <div class="civ-dialog civ-city">
       <h2>🏛 ${c.name} <span class="civ-pop">население ${c.pop}</span></h2>
-      <div class="civ-yields">🌾 ${y.food} (еда) · 🔨 ${y.prod} (произв.) · 🔬 ${y.sci} (наука)</div>
-      ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeProd}🔨 +${y.tradeSci}🔬</div>` : ""}
+      <div class="civ-yields">🌾 ${y.food} (еда) · 🔨 ${y.prod} (произв.) · 🔬 ${y.sci} (наука) · 🪙 ${y.gold} (золото)</div>
+      ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeGold}🪙</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
       ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
       ${c.buildings.length ? `<div class="civ-yields">Постройки: ${c.buildings.map((b) => BUILDINGS[b].name).join(", ")}</div>` : ""}
@@ -335,11 +340,19 @@ function showCity(c) {
         : `<div class="civ-yields">Религии нет</div>`}
       <h3>Производить:</h3>
       <div class="civ-prod-list">
-        ${opts.map((o) => `
-          <button class="civ-prod ${c.producing && c.producing.id === o.id && c.producing.k === o.k ? "sel" : ""}"
-                  data-k="${o.k}" data-id="${o.id}">
-            <b>${o.name}</b><span>${o.info}</span><span>🔨 ${o.cost}</span>
-          </button>`).join("")}
+        ${opts.map((o) => {
+          const price = Math.ceil(o.cost * 3);
+          const afford = p.gold >= price;
+          return `
+          <div style="display:flex;gap:6px;align-items:stretch">
+            <button class="civ-prod ${c.producing && c.producing.id === o.id && c.producing.k === o.k ? "sel" : ""}" style="flex:1"
+                    data-k="${o.k}" data-id="${o.id}">
+              <b>${o.name}</b><span>${o.info}</span><span>🔨 ${o.cost}</span>
+            </button>
+            <button class="btn text civ-buy" style="width:auto;white-space:nowrap;padding:6px 10px;font-size:12.5px"
+                    data-k="${o.k}" data-id="${o.id}" ${afford ? `title="Купить за ${price}🪙"` : `disabled title="Недостаточно золота: нужно ${price}🪙"`}>Купить 🪙${price}</button>
+          </div>`;
+        }).join("")}
       </div>
       <h3>Чудеса света:</h3>
       <div class="civ-prod-list">
@@ -354,6 +367,12 @@ function showCity(c) {
   `;
   rootEl.appendChild(m);
   document.getElementById("civ-close").onclick = closeModal;
+  m.querySelectorAll(".civ-buy").forEach((b) => {
+    b.onclick = () => {
+      const r = buyForGold(c.id, b.dataset.k, b.dataset.id);
+      if (r.ok) { save(); showCity(c); refresh(); }
+    };
+  });
   m.querySelectorAll(".civ-prod").forEach((b) => {
     b.onclick = () => {
       if (b.dataset.k === "wonder" && (S.wonders || []).some((w) => w.id === b.dataset.id)) return;

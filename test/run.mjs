@@ -223,7 +223,7 @@ if (city) {
   const p0 = api.S.players[0];
   p0.techs.push("archery", "iron", "pottery", "writing", "masonry", "bronze");
   const y = api.cityYields(city);
-  check("city yields sane", y.food >= 2 && y.prod >= 1 && y.sci >= 2);
+  check("city yields sane", y.food >= 2 && y.prod >= 1 && y.sci >= 2 && y.gold >= 2 && y.tradeGold >= 0);
 } else {
   console.log("info", "player eliminated before production test");
 }
@@ -273,10 +273,12 @@ if (pair) {
   check("sea trade between coastal cities", traded.length >= 2);
   if (traded[0]) {
     const yy = api.cityYields(traded[0]);
-    check("sea trade bonus applied", yy.trade === true && yy.prod >= 3 && yy.sci >= 3);
+    check("sea trade bonus applied", yy.trade === true && yy.tradeGold >= 2 &&
+      yy.gold === 2 + Math.floor(traded[0].pop / 2) + yy.tradeGold);
     traded[0].buildings.push("market");
     const ym = api.cityYields(traded[0]);
-    check("market doubles sea trade", ym.prod === yy.prod + 2 && ym.sci === yy.sci + 1);
+    check("market doubles sea trade", ym.tradeGold === yy.tradeGold * 2 && ym.gold === yy.gold + yy.tradeGold &&
+      ym.prod === yy.prod && ym.sci === yy.sci);
   }
 } else {
   check("sea trade between coastal cities", false);
@@ -1206,6 +1208,89 @@ if (!fast) {
     check(`${tag}: diplomacy state consistent`, diploOk);
   }
 }
+
+api.newGame(1);
+check("gold starts at 50", api.S.players.every((p) => p.gold === 50));
+const gp0 = api.playerGoldPerTurn(0);
+check("upkeep counts units without cities", gp0.income === 0 && gp0.upkeep === 2 && gp0.net === -2);
+
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const goldCity = api.S.cities.find((c) => c.owner === 0);
+const gt = api.playerGoldPerTurn(0);
+check("city tax and upkeep converge", api.cityYields(goldCity).gold === 2 &&
+  gt.income === 2 && gt.upkeep === 3 && gt.net === -1);
+api.endTurn();
+check("gold accrues net per turn", api.S.players[0].gold === 49);
+
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const strikeCity = api.S.cities.find((c) => c.owner === 0);
+api.S.players[0].gold = 0;
+api.S.players[0].researching = "agriculture";
+api.S.players[0].progress = 0;
+for (let i = 0; i < 10; i++) api.spawn("warrior", 0, strikeCity.x, strikeCity.y);
+api.endTurn();
+check("empty treasury stops science", api.S.players[0].gold === 0 && api.S.players[0].progress === 0 &&
+  api.S.log.some((l) => l.includes("Казна пуста")));
+api.S.players[0].gold = 20;
+api.endTurn();
+check("science resumes with funded treasury", api.S.players[0].gold === 9 && api.S.players[0].progress > 0);
+
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const buyCity = api.S.cities.find((c) => c.owner === 0);
+api.S.players[0].gold = 1000;
+buyCity.prodStored = 5;
+const warriors0 = api.S.units.filter((u) => u.owner === 0 && u.type === "warrior").length;
+const rbu = api.buyForGold(buyCity.id, "unit", "warrior");
+check("buyForGold unit charges and spawns", rbu.ok === true &&
+  api.S.players[0].gold === 1000 - Math.ceil(UT.warrior.cost * 3) &&
+  api.S.units.filter((u) => u.owner === 0 && u.type === "warrior").length === warriors0 + 1 &&
+  buyCity.prodStored === 5);
+api.S.players[0].techs.push("currency");
+const rbb = api.buyForGold(buyCity.id, "building", "market");
+check("buyForGold building charges and builds", rbb.ok === true && buyCity.buildings.includes("market") &&
+  api.S.players[0].gold === 1000 - Math.ceil(UT.warrior.cost * 3) - Math.ceil(BT.market.cost * 3));
+check("buyForGold rejects built building", api.buyForGold(buyCity.id, "building", "market").ok === false);
+check("buyForGold rejects wonders", api.buyForGold(buyCity.id, "wonder", "pyramids").ok === false);
+api.S.players[0].gold = 10;
+check("buyForGold rejects when short of gold", api.buyForGold(buyCity.id, "unit", "scout").ok === false &&
+  api.S.players[0].gold === 10);
+
+api.newGame(1);
+const awSet = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+api.foundCity(awSet);
+const auCity = api.S.cities.find((c) => c.owner === 1);
+api.S.players[1].gold = 300;
+const aiUnits0 = api.S.units.filter((u) => u.owner === 1).length;
+api.declareWar(0, 1);
+const aiRnd2 = Math.random;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = aiRnd2; }
+check("AI buys combat unit at war", api.S.units.filter((u) => u.owner === 1).length === aiUnits0 + 1 &&
+  api.S.players[1].gold === 300 - Math.ceil(UT.warrior.cost * 3));
+
+api.newGame(1);
+const apSet = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+api.foundCity(apSet);
+const apCity = api.S.cities.find((c) => c.owner === 1);
+api.S.players[1].techs.push("currency");
+api.S.players[1].gold = 250;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = aiRnd2; }
+check("AI buys economy building at peace", apCity.buildings.includes("market") &&
+  api.S.players[1].gold === 250 - Math.ceil(BT.market.cost * 3));
+
+api.newGame(1);
+api.S.players[0].gold = 77;
+api.save();
+const rawGold = JSON.parse(store["civ1_save"]);
+rawGold.players.forEach((p) => { delete p.gold; });
+store["civ1_save"] = JSON.stringify(rawGold);
+check("old save without gold migrates to 50", api.load() === true && api.S.players.every((p) => p.gold === 50));
+api.S.players[0].gold = 64;
+api.save();
+check("gold survives save-load roundtrip", api.load() === true && api.S.players[0].gold === 64);
 
 if (!mutation) {
   const expectFail = {
