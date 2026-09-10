@@ -28,6 +28,9 @@ const C = {
   roof: "#95502e",
   fish: "#7fa8c9",
   whale: "#33566e",
+  gold: "#d4af37",
+  sand: "#c9b283",
+  bronze: "#5d8a6e",
 };
 
 function geo(key, make) {
@@ -305,6 +308,71 @@ export function createReligionMesh(religionId) {
   } else {
     add(group, geo("r:stele", () => new THREE.BoxGeometry(0.1, 0.42, 0.14)), gold, 0, 0.21, 0);
     add(group, geo("r:disc", () => new THREE.CylinderGeometry(0.13, 0.13, 0.028, 12)), gold, 0, 0.48, 0).rotation.x = Math.PI / 2;
+  }
+  return group;
+}
+
+export function createWonderMesh(id) {
+  const group = new THREE.Group();
+  const stoneM = mat(C.stone);
+  const stoneDarkM = mat(C.stoneDark);
+  const limeM = mat(C.wallLight);
+  const goldM = mat(C.gold);
+  if (id === "pyramids") {
+    const sandM = mat(C.sand);
+    add(group, geo("w:pyr1", () => new THREE.BoxGeometry(0.38, 0.12, 0.38)), sandM, -0.04, 0.06, -0.04);
+    add(group, geo("w:pyr2", () => new THREE.BoxGeometry(0.3, 0.11, 0.3)), sandM, -0.04, 0.175, -0.04);
+    add(group, geo("w:pyr3", () => new THREE.BoxGeometry(0.22, 0.1, 0.22)), sandM, -0.04, 0.28, -0.04);
+    add(group, geo("w:pyr4", () => new THREE.BoxGeometry(0.14, 0.09, 0.14)), sandM, -0.04, 0.375, -0.04);
+    add(group, geo("w:pyrCap", () => new THREE.ConeGeometry(0.055, 0.1, 4)), goldM, -0.04, 0.47, -0.04).rotation.y = Math.PI / 4;
+    add(group, geo("w:pyrSmall", () => new THREE.ConeGeometry(0.09, 0.17, 4)), sandM, 0.16, 0.085, 0.14).rotation.y = Math.PI / 4;
+  } else if (id === "greatlibrary") {
+    add(group, geo("w:libPodium", () => new THREE.BoxGeometry(0.4, 0.05, 0.28)), stoneM, 0, 0.025, 0);
+    const colGeo = geo("w:libCol", () => new THREE.CylinderGeometry(0.018, 0.022, 0.3, 6));
+    for (const x of [-0.13, 0, 0.13]) {
+      add(group, colGeo, limeM, x, 0.2, -0.08);
+      add(group, colGeo, limeM, x, 0.2, 0.08);
+    }
+    add(group, geo("w:libArch", () => new THREE.BoxGeometry(0.38, 0.05, 0.24)), stoneM, 0, 0.375, 0);
+    const ped = add(group, geo("w:pediment", () => new THREE.CylinderGeometry(0.2, 0.2, 0.2, 3)), goldM, 0, 0.5, 0);
+    ped.rotation.x = -Math.PI / 2;
+    add(group, geo("w:libScroll", () => new THREE.CylinderGeometry(0.035, 0.035, 0.14, 6)), goldM, 0, 0.04, 0.19).rotation.x = Math.PI / 2;
+    group.rotation.y = Math.PI / 4;
+  } else if (id === "colossus") {
+    const bronzeM = mat(C.bronze);
+    add(group, geo("w:colPed1", () => new THREE.BoxGeometry(0.28, 0.04, 0.28)), stoneM, 0, 0.02, 0);
+    add(group, geo("w:colPed2", () => new THREE.BoxGeometry(0.22, 0.1, 0.22)), stoneDarkM, 0, 0.09, 0);
+    const fig = new THREE.Group();
+    fig.position.set(0, 0.14, 0);
+    group.add(fig);
+    add(fig, geo("fig:0.075:0.34", () => new THREE.CylinderGeometry(0.054, 0.075, 0.34, 7)), bronzeM, 0, 0.17, 0);
+    add(fig, geo("fig:head", () => new THREE.SphereGeometry(0.085, 8, 6)), bronzeM, 0, 0.4, 0);
+    add(group, geo("w:colArm", () => new THREE.CylinderGeometry(0.018, 0.018, 0.22, 5)), bronzeM, 0.14, 0.47, 0).rotation.z = -0.7;
+    add(group, geo("w:colFlame", () => new THREE.ConeGeometry(0.055, 0.13, 6)), goldM, 0.23, 0.62, 0);
+  } else if (id === "greatwall") {
+    add(group, geo("w:wallSeg", () => new THREE.BoxGeometry(0.42, 0.14, 0.05)), stoneDarkM, 0, 0.09, 0);
+    const crenGeo = geo("w:wallCren", () => new THREE.BoxGeometry(0.05, 0.05, 0.05));
+    for (const x of [-0.15, -0.05, 0.05, 0.15]) add(group, crenGeo, stoneM, x, 0.185, 0);
+    const towerGeo = geo("w:wallTower", () => new THREE.BoxGeometry(0.11, 0.26, 0.11));
+    add(group, towerGeo, stoneM, -0.2, 0.13, 0);
+    add(group, towerGeo, stoneM, 0.2, 0.13, 0);
+    const capGeo = geo("w:wallCap", () => new THREE.ConeGeometry(0.085, 0.08, 4));
+    add(group, capGeo, stoneDarkM, -0.2, 0.3, 0).rotation.y = Math.PI / 4;
+    add(group, capGeo, stoneDarkM, 0.2, 0.3, 0).rotation.y = Math.PI / 4;
+    group.rotation.y = Math.PI / 4;
+  } else if (id === "oraclew") {
+    add(group, geo("w:orcStep1", () => new THREE.BoxGeometry(0.36, 0.05, 0.26)), stoneM, 0, 0.025, 0);
+    add(group, geo("w:orcStep2", () => new THREE.BoxGeometry(0.3, 0.05, 0.22)), stoneDarkM, 0, 0.075, 0);
+    const colGeo = geo("w:orcCol", () => new THREE.CylinderGeometry(0.02, 0.024, 0.26, 6));
+    for (const x of [-0.1, 0.1]) {
+      add(group, colGeo, limeM, x, 0.23, -0.06);
+      add(group, colGeo, limeM, x, 0.23, 0.06);
+    }
+    add(group, geo("w:orcArch", () => new THREE.BoxGeometry(0.34, 0.045, 0.24)), stoneM, 0, 0.383, 0);
+    const ped = add(group, geo("w:pediment", () => new THREE.CylinderGeometry(0.2, 0.2, 0.2, 3)), goldM, 0, 0.51, 0);
+    ped.rotation.x = -Math.PI / 2;
+    add(group, geo("w:orcOrb", () => new THREE.SphereGeometry(0.028, 6, 5)), goldM, 0, 0.72, 0);
+    group.rotation.y = Math.PI / 4;
   }
   return group;
 }

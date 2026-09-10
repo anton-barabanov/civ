@@ -876,6 +876,79 @@ let wErr = null;
 try { api.processEconomy(); } catch (e) { wErr = e; }
 check("wonder production stable after migration", wErr === null);
 
+check("culture win constants exposed", api.CULTURE_WIN_CITIES === 3 && api.CULTURE_WIN_THRESHOLD === 200);
+
+const cultSpots = () => {
+  const spots = [];
+  for (let j = 0; j < api.S.map.length && spots.length < 4; j++) {
+    const x = j % 26, y = (j / 26) | 0;
+    if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
+    if (spots.every(([sx, sy]) => Math.max(Math.abs(sx - x), Math.abs(sy - y)) >= 3)) spots.push([x, y]);
+  }
+  return spots;
+};
+
+api.newGame(1);
+api.S.units = [];
+const cs1 = cultSpots();
+for (let i = 0; i < 3; i++) api.foundCity(api.spawn("settler", 0, cs1[i][0], cs1[i][1]));
+api.foundCity(api.spawn("settler", 1, cs1[3][0], cs1[3][1]));
+api.S.cities.filter((c) => c.owner === 0).forEach((c) => { c.culture = 200; });
+check("legendaryCities counts own cities at threshold",
+  api.legendaryCities(0).length === 3 && api.legendaryCities(1).length === 0);
+api.endTurn();
+check("player culture victory", api.S.over && api.S.over.winner === 0 && api.S.over.type === "culture");
+check("culture victory logged", api.S.log.some((l) => l.toLowerCase().includes("легендарн")));
+
+api.newGame(1);
+api.S.units = [];
+const cs2 = cultSpots();
+api.foundCity(api.spawn("settler", 0, cs2[0][0], cs2[0][1]));
+for (let i = 1; i < 4; i++) api.foundCity(api.spawn("settler", 1, cs2[i][0], cs2[i][1]));
+api.S.cities.filter((c) => c.owner === 1).forEach((c) => { c.culture = 200; });
+api.endTurn();
+check("AI culture victory is player defeat", api.S.over && api.S.over.winner === 1 && api.S.over.type === "culture");
+
+api.newGame(1);
+api.S.units = [];
+const cs3 = cultSpots();
+for (let i = 0; i < 3; i++) api.foundCity(api.spawn("settler", 1, cs3[i][0], cs3[i][1]));
+api.S.cities.forEach((c) => { c.culture = 200; });
+api.endTurn();
+check("conquest priority over culture", api.S.over && api.S.over.type === "conquest" && api.S.over.winner === 1);
+
+api.S.over = { winner: 0, type: "culture" };
+api.endTurn();
+check("victory type not overwritten", api.S.over.winner === 0 && api.S.over.type === "culture");
+
+api.newGame(1);
+api.S.units = [];
+const cs4 = cultSpots();
+for (let i = 0; i < 3; i++) api.foundCity(api.spawn("settler", 0, cs4[i][0], cs4[i][1]));
+api.foundCity(api.spawn("settler", 1, cs4[3][0], cs4[3][1]));
+const pc4 = api.S.cities.filter((c) => c.owner === 0);
+pc4[0].culture = 200;
+pc4[1].culture = 200;
+pc4[2].culture = 199;
+check("city below threshold not legendary", api.legendaryCities(0).length === 2);
+pc4[2].culture = 198;
+api.endTurn();
+check("no culture victory below threshold", api.S.over === null);
+
+api.newGame(1);
+api.S.over = { winner: 1 };
+api.save();
+check("old over migrates to conquest", api.load() === true && api.S.over.winner === 1 && api.S.over.type === "conquest");
+api.S.over = { winner: 0, type: "culture" };
+api.save();
+check("over type survives save-load roundtrip", api.load() === true && api.S.over.winner === 0 && api.S.over.type === "culture");
+
+const overAppSrc = readFileSync("apps/civ/app.js", "utf8");
+const topbarSrc = overAppSrc.slice(overAppSrc.indexOf("function renderTopbar"), overAppSrc.indexOf("function renderPanel"));
+check("renderTopbar culture indicator", topbarSrc.includes("Легендарные города") && topbarSrc.includes("legendaryCities"));
+check("renderOver uses unified new game controls",
+  overAppSrc.includes('id="civ-ng-controls"') && !overAppSrc.includes("newGameButtons"));
+
 if (!mutation) {
   const expectFail = { a: "FAIL granary +2 food", b: "FAIL processEconomy updates borders after growth" };
   for (const m of ["a", "b"]) {

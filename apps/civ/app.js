@@ -5,6 +5,7 @@ import {
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf,
   RELIGIONS, WONDERS, isHolyCity, cityById,
+  CULTURE_WIN_CITIES, legendaryCities,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -159,6 +160,7 @@ function renderTopbar() {
         ${res ? `🔬 ${res.name} ${pct}%` : "🔬 выберите технологию"}
         <div class="civ-sci-bar"><div style="width:${pct}%"></div></div>
       </div>
+      <div class="civ-cult" title="Легендарные города: ${legendaryCities(0).length} из ${CULTURE_WIN_CITIES}">🏛 ${legendaryCities(0).length}/${CULTURE_WIN_CITIES}</div>
     </div>
     <div class="topbar-row topbar-actions">
       <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
@@ -250,18 +252,43 @@ function renderOver() {
     el.className = "civ-modal";
     rootEl.appendChild(el);
   }
+  const type = S.over.type === "culture" ? "culture" : "conquest";
   const win = S.over.winner === 0;
+  const winner = S.players[S.over.winner] || S.players[0];
+  const title = !win ? "💀 Поражение"
+    : type === "culture" ? "🕊 Культурная победа!" : "🏆 Победа завоеванием!";
+  const sub = !win
+    ? `${escapeHtml(winner.name)} победили ${type === "culture" ? "культурно" : "завоеванием"}`
+    : type === "culture" ? "Ваши легендарные города — слава веков." : "Все противники повержены.";
+  const myCities = S.cities.filter((c) => c.owner === 0);
+  const cultureTotal = myCities.reduce((a, c) => a + (c.culture || 0), 0);
+  const cityItems = S.players
+    .map((p, i) => ({ p, n: S.cities.filter((c) => c.owner === i).length }))
+    .filter((r) => r.n > 0)
+    .map((r) => `<span><i class="civ-dot" style="background:${r.p.color}"></i>${escapeHtml(r.p.name)}: ${r.n}</span>`)
+    .join("");
+  const legends = legendaryCities(0);
+  const wonderItems = (S.wonders || []).map((w) => {
+    const d = WONDERS[w.id];
+    const c = cityById(w.cityId);
+    const owner = c ? S.players[c.owner] : null;
+    return `<span><i class="civ-dot" style="background:${owner ? owner.color : "#888"}"></i>${d.icon} ${d.name}${owner ? ` (${escapeHtml(owner.name)})` : ""}</span>`;
+  }).join("");
   el.innerHTML = `
     <div class="civ-dialog">
-      <h2>${win ? "🏆 Победа!" : "💀 Поражение"}</h2>
-      <p>${win ? "Вы захватили все города противника." : "Противник уничтожил вашу цивилизацию."}</p>
-      <p>Играть снова:</p>
-      <div class="civ-diff-btns">${newGameButtons()}</div>
+      <h2>${title}</h2>
+      <p>${sub}</p>
+      <div class="civ-summary">
+        <div class="civ-yields">Ходов: ${S.turn} · Технологий: ${S.players[0].techs.length} · Суммарная культура: ${cultureTotal}</div>
+        <div class="civ-sum-row">Города: ${cityItems}</div>
+        ${legends.length ? `<div class="civ-sum-row">Легендарные города: ${legends.map((c) => escapeHtml(c.name)).join(", ")}</div>` : ""}
+        ${wonderItems ? `<div class="civ-sum-row">Чудеса света: ${wonderItems}</div>` : ""}
+      </div>
+      <h3>Играть снова</h3>
+      <div id="civ-ng-controls"></div>
     </div>
   `;
-  el.querySelectorAll(".civ-diff-btn").forEach((b) => {
-    b.onclick = () => { newGame(Number(b.dataset.diff)); refresh(); };
-  });
+  newGameControls(1, 1);
 }
 
 function showCity(c) {
@@ -467,11 +494,6 @@ function closeModal() {
   if (m) m.remove();
 }
 
-function newGameButtons() {
-  return DIFFICULTIES.map((d, i) =>
-    `<button class="btn ${i === 1 ? "primary" : "text"} civ-diff-btn" data-diff="${i}">${d.title}</button>`).join("");
-}
-
 function newGameControls(selectedDiff = 1, selectedOpps = 1, onDone) {
   const holder = document.getElementById("civ-ng-controls");
   if (!holder) return;
@@ -508,6 +530,7 @@ function newGameControls(selectedDiff = 1, selectedOpps = 1, onDone) {
 }
 
 function showStart(showContinue) {
+  if (getState().over) return;
   const m = document.createElement("div");
   m.className = "civ-modal";
   m.id = "civ-start";

@@ -213,3 +213,30 @@ body {
   gap: 8px;
 }
 .civ-diff-btns .btn { flex: 1; }
+
+.civ-cult {
+  font-size: 12.5px;
+  color: var(--on-surface-var);
+  white-space: nowrap;
+}
+.civ-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.civ-sum-row {
+  font-size: 13px;
+  color: var(--on-surface-var);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.civ-sum-row span { white-space: nowrap; }
+.civ-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}

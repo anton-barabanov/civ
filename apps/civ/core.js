@@ -88,6 +88,9 @@ const RELIGIONS = {
 const REL_SPREAD_RADIUS = 3;
 const REL_SPREAD_THRESHOLD = 5;
 
+const CULTURE_WIN_CITIES = 3;
+const CULTURE_WIN_THRESHOLD = 200;
+
 const NATIONS = [
   { name: "Рим", color: "#4a90d9", cityNames: ["Рим", "Антиум", "Кумы", "Неаполь", "Равенна", "Арримин", "Арретий", "Медиолан"] },
   { name: "Галлы", color: "#d9534f", cityNames: ["Герговия", "Аварик", "Бибракте", "Аlesia", "Нуманция", "Оппид", "Лутеция", "Викс"] },
@@ -1110,6 +1113,10 @@ function playerAlive(idx) {
     S.units.some((u) => u.owner === idx && u.type === "settler");
 }
 
+function legendaryCities(pIdx) {
+  return S.cities.filter((c) => c.owner === pIdx && (c.culture || 0) >= CULTURE_WIN_THRESHOLD);
+}
+
 function checkVictory() {
   if (S.over) return;
   if (!playerAlive(0)) {
@@ -1117,11 +1124,24 @@ function checkVictory() {
     for (let i = 1; i < S.players.length; i++) {
       if (playerAlive(i)) { winner = i; break; }
     }
-    S.over = { winner };
+    S.over = { winner, type: "conquest" };
     return;
   }
-  for (let i = 1; i < S.players.length; i++) if (playerAlive(i)) return;
-  S.over = { winner: 0 };
+  let aiAlive = false;
+  for (let i = 1; i < S.players.length; i++) if (playerAlive(i)) { aiAlive = true; break; }
+  if (!aiAlive) {
+    S.over = { winner: 0, type: "conquest" };
+    return;
+  }
+  for (let i = 0; i < S.players.length; i++) {
+    if (!playerAlive(i)) continue;
+    const legends = legendaryCities(i);
+    if (legends.length >= CULTURE_WIN_CITIES) {
+      S.over = { winner: i, type: "culture" };
+      addLog(`Легендарные города ${legends.map((c) => c.name).join(", ")} приносят ${S.players[i].name} культурную победу`);
+      return;
+    }
+  }
 }
 
 function endTurn() {
@@ -1157,6 +1177,7 @@ function load() {
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
     if (!Array.isArray(S.religions)) S.religions = [];
     if (!Array.isArray(S.wonders)) S.wonders = [];
+    if (S.over && !S.over.type) S.over.type = "conquest";
     for (const c of S.cities) {
       if (!c.religion) c.religion = null;
       if (typeof c.relPressure !== "number") c.relPressure = 0;
@@ -1182,9 +1203,10 @@ export function getVisible() { return visible; }
 
 export {
   TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, W, H, TS, SAVE_KEY,
+  CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
-  cityYields, techAvailable, processEconomy, endTurn, save, load,
+  cityYields, techAvailable, processEconomy, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
 };
@@ -1198,7 +1220,10 @@ export function debugApi() {
     get WONDERS() { return WONDERS; },
     get NATIONS() { return NATIONS; },
     get RELIGIONS() { return RELIGIONS; },
+    get CULTURE_WIN_CITIES() { return CULTURE_WIN_CITIES; },
+    get CULTURE_WIN_THRESHOLD() { return CULTURE_WIN_THRESHOLD; },
     getNations: () => NATIONS,
+    legendaryCities,
     newGame,
     endTurn,
     aiTurn,
