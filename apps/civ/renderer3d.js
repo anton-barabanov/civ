@@ -289,7 +289,7 @@ export async function createRenderer3D(container, handlers) {
       if (!e) {
         const holder = new THREE.Group();
         overlayRoot.add(holder);
-        e = { holder, mesh: null, pop: -1, walls: null, owner: -1 };
+        e = { holder, mesh: null, pop: -1, walls: null, owner: -1, religion: null, relMesh: null };
         cityHolders.set(c.id, e);
       }
       const walls = !!c.walls;
@@ -300,6 +300,16 @@ export async function createRenderer3D(container, handlers) {
         e.pop = c.pop;
         e.walls = walls;
         e.owner = c.owner;
+      }
+      const rel = c.religion || null;
+      if (e.religion !== rel) {
+        if (e.relMesh) e.holder.remove(e.relMesh);
+        e.relMesh = rel ? models.createReligionMesh(rel) : null;
+        if (e.relMesh) {
+          e.relMesh.position.set(-0.32, 0.45, 0.32);
+          e.holder.add(e.relMesh);
+        }
+        e.religion = rel;
       }
       e.holder.position.set(tileX(c.x, vm), 0, tileZ(c.y, vm));
     }

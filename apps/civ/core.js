@@ -71,6 +71,15 @@ const TECHS = {
   gunpowder: { name: "Порох", cost: 140, req: ["machinery", "education"] },
 };
 
+const RELIGIONS = {
+  oracle: { name: "Учение Оракула", tech: "mysticism", icon: "🔮", color: "#b06bd9" },
+  muses: { name: "Культ Муз", tech: "literature", icon: "📜", color: "#3aa88a" },
+  sungod: { name: "Вера Ра", tech: "monarchy", icon: "☀", color: "#e8c34a" },
+};
+
+const REL_SPREAD_RADIUS = 3;
+const REL_SPREAD_THRESHOLD = 5;
+
 const NATIONS = [
   { name: "Рим", color: "#4a90d9", cityNames: ["Рим", "Антиум", "Кумы", "Неаполь", "Равенна", "Арримин", "Арретий", "Медиолан"] },
   { name: "Галлы", color: "#d9534f", cityNames: ["Герговия", "Аварик", "Бибракте", "Аlesia", "Нуманция", "Оппид", "Лутеция", "Викс"] },
@@ -378,6 +387,7 @@ function newGame(diff = 1, opponents = 1) {
     over: null,
     sel: null,
     relations: {},
+    religions: [],
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
@@ -554,6 +564,8 @@ function foundCity(u) {
     producing: null,
     buildings: [],
     culture: 0,
+    religion: null,
+    relPressure: 0,
   };
   S.cities.push(c);
   S.units = S.units.filter((x) => x !== u);
@@ -631,6 +643,55 @@ function buildingEffects(c) {
   return e;
 }
 
+function isHolyCity(c) {
+  return S.religions.some((r) => r.holyCityId === c.id);
+}
+
+function foundReligion(owner, id) {
+  const def = RELIGIONS[id];
+  if (!def || S.religions.some((r) => r.id === id)) return false;
+  const capital = S.cities.filter((c) => c.owner === owner).sort((a, b) => a.id - b.id)[0];
+  if (!capital) return false;
+  S.religions.push({ id, tech: def.tech, owner, holyCityId: capital.id, turn: S.turn });
+  capital.religion = id;
+  capital.relPressure = 0;
+  addLog(owner === 0
+    ? `В ${capital.name} основана религия ${def.name}`
+    : `${S.players[owner].name}: в городе ${capital.name} основана религия ${def.name}`);
+  return true;
+}
+
+function checkFoundReligions() {
+  for (let i = 0; i < S.players.length; i++)
+    for (const id in RELIGIONS)
+      if (S.players[i].techs.includes(RELIGIONS[id].tech)) foundReligion(i, id);
+}
+
+function spreadReligions() {
+  for (const c of S.cities) {
+    if (c.religion || isHolyCity(c)) continue;
+    const near = S.cities.filter((o) => o.religion && o.id !== c.id && dist(c.x, c.y, o.x, o.y) <= REL_SPREAD_RADIUS);
+    let pressure = near.length;
+    const sea = [];
+    if (isCoastal(c.x, c.y) && S.players[c.owner].techs.includes("sailing")) {
+      const comps = new Set(waterAdjKeys(c.x, c.y).map((k) => S.waterComp[k]));
+      for (const o of S.cities) {
+        if (!o.religion || o.id === c.id || near.includes(o) || !isCoastal(o.x, o.y)) continue;
+        if (waterAdjKeys(o.x, o.y).some((k) => comps.has(S.waterComp[k]))) sea.push(o);
+      }
+      if (sea.length) pressure += 1;
+    }
+    if (!pressure) continue;
+    c.relPressure = (c.relPressure || 0) + pressure;
+    if (c.relPressure >= REL_SPREAD_THRESHOLD) {
+      const src = [...near, ...sea].sort((a, b) =>
+        dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y) || a.id - b.id)[0];
+      c.religion = src.religion;
+      c.relPressure = 0;
+    }
+  }
+}
+
 function cityYields(c) {
   let food = 2, prod = 1;
   const cand = [];
@@ -656,7 +717,7 @@ function cityYields(c) {
   const e = buildingEffects(c);
   food += e.foodFlat;
   prod += e.prodFlat;
-  let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat;
+  let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat + (isHolyCity(c) ? 2 : 0);
   sci = Math.round(sci * e.sciMult);
   if (tradeActive(c)) { prod += 2 * e.tradeMult; sci += 1 * e.tradeMult; }
   return { food, prod, sci, trade: tradeActive(c), tradeProd: tradeActive(c) ? 2 * e.tradeMult : 0, tradeSci: tradeActive(c) ? e.tradeMult : 0 };
@@ -673,7 +734,7 @@ function processEconomy() {
     const p = S.players[c.owner];
     const y = cityYields(c);
     const e = buildingEffects(c);
-    c.culture = (c.culture || 0) + 1 + e.culture;
+    c.culture = (c.culture || 0) + 1 + e.culture + (c.religion ? 1 : 0);
     const surplus = y.food - c.pop * 2;
     c.foodStored = Math.max(0, c.foodStored + surplus);
     const need = 10 + c.pop * 5;
@@ -726,11 +787,15 @@ function processEconomy() {
         p.researching = null;
         p.progress = 0;
         if (c.owner === 0) addLog(`Изучена технология: ${TECHS[done].name}`);
+        const relId = Object.keys(RELIGIONS).find((id) => RELIGIONS[id].tech === done);
+        if (relId) foundReligion(c.owner, relId);
       }
     }
   }
   recomputeBorders();
   for (const u of S.units) u.moves = UNITS[u.type].moves;
+  checkFoundReligions();
+  spreadReligions();
 }
 
 function aiTurn() {
@@ -981,6 +1046,11 @@ function load() {
           S.relations[relKey(i, j)] = { war: false, since: -1 };
     }
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
+    if (!Array.isArray(S.religions)) S.religions = [];
+    for (const c of S.cities) {
+      if (!c.religion) c.religion = null;
+      if (typeof c.relPressure !== "number") c.relPressure = 0;
+    }
     S.players.forEach((p, i) => {
       p.isHuman = i === 0;
       if (!Array.isArray(p.techs)) p.techs = [];
@@ -1001,10 +1071,11 @@ export function getState() { return S; }
 export function getVisible() { return visible; }
 
 export {
-  TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, NATIONS, W, H, TS, SAVE_KEY,
+  TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, W, H, TS, SAVE_KEY,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity,
   cityYields, techAvailable, processEconomy, endTurn, save, load,
+  foundReligion, checkFoundReligions, spreadReligions, isHolyCity,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
 };
 
@@ -1015,6 +1086,7 @@ export function debugApi() {
     get UNITS() { return UNITS; },
     get BUILDINGS() { return BUILDINGS; },
     get NATIONS() { return NATIONS; },
+    get RELIGIONS() { return RELIGIONS; },
     getNations: () => NATIONS,
     newGame,
     endTurn,
@@ -1037,6 +1109,10 @@ export function debugApi() {
     load,
     computeVision,
     processEconomy,
+    foundReligion,
+    checkFoundReligions,
+    spreadReligions,
+    isHolyCity,
     techAvailable,
     cityYields,
     buildingEffects,

@@ -292,6 +292,23 @@ export function createCityMesh(pop, ownerColor, hasWalls = false, seed = 42) {
   return group;
 }
 
+export function createReligionMesh(religionId) {
+  const group = new THREE.Group();
+  const gold = mat("#d4af37");
+  if (religionId === "oracle") {
+    add(group, geo("r:obelisk", () => new THREE.CylinderGeometry(0.045, 0.085, 0.4, 4)), gold, 0, 0.2, 0).rotation.y = Math.PI / 4;
+    add(group, geo("r:obeliskTip", () => new THREE.ConeGeometry(0.045, 0.14, 4)), gold, 0, 0.47, 0).rotation.y = Math.PI / 4;
+  } else if (religionId === "muses") {
+    add(group, geo("r:colBase", () => new THREE.CylinderGeometry(0.075, 0.085, 0.05, 8)), gold, 0, 0.025, 0);
+    add(group, geo("r:column", () => new THREE.CylinderGeometry(0.05, 0.055, 0.38, 8)), gold, 0, 0.24, 0);
+    add(group, geo("r:scroll", () => new THREE.BoxGeometry(0.2, 0.08, 0.08)), gold, 0, 0.47, 0).rotation.y = 0.5;
+  } else {
+    add(group, geo("r:stele", () => new THREE.BoxGeometry(0.1, 0.42, 0.14)), gold, 0, 0.21, 0);
+    add(group, geo("r:disc", () => new THREE.CylinderGeometry(0.13, 0.13, 0.028, 12)), gold, 0, 0.48, 0).rotation.x = Math.PI / 2;
+  }
+  return group;
+}
+
 export function createWaterResourceMesh(kind) {
   const group = new THREE.Group();
   if (kind === "whale") {

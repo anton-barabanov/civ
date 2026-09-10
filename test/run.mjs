@@ -607,6 +607,113 @@ check("old save without relations migrates to peace", api.load() === true &&
   Object.keys(api.S.relations).length === 3 &&
   Object.values(api.S.relations).every((r) => r.war === false && r.since === -1));
 
+api.newGame(1);
+check("religions empty after newGame", Array.isArray(api.S.religions) && api.S.religions.length === 0 && api.S.cities.length === 0);
+check("RELIGIONS table exposed", !!api.RELIGIONS && ["oracle", "muses", "sungod"].every((id) =>
+  api.RELIGIONS[id] && api.RELIGIONS[id].name && api.RELIGIONS[id].icon && !!api.TECHS[api.RELIGIONS[id].tech]));
+
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const relCap = api.S.cities.find((c) => c.owner === 0);
+api.S.players[0].researching = "mysticism";
+api.S.players[0].progress = api.TECHS.mysticism.cost;
+api.processEconomy();
+const oracle = api.S.religions.find((r) => r.id === "oracle");
+check("mysticism completion founds oracle in capital", !!oracle && oracle.owner === 0 && oracle.tech === "mysticism" &&
+  oracle.holyCityId === relCap.id && relCap.religion === "oracle" && api.isHolyCity(relCap) === true);
+check("founding logged", api.S.log.some((l) => l.includes("основана религия")));
+check("religion founded only once", api.foundReligion(0, "oracle") === false && api.foundReligion(1, "oracle") === false &&
+  api.S.religions.filter((r) => r.id === "oracle").length === 1);
+
+api.foundCity(api.S.units.find((u) => u.owner === 1 && u.type === "settler"));
+const p1RelCity = api.S.cities.find((c) => c.owner === 1);
+api.S.players[1].techs.push("mysticism", "literature");
+api.checkFoundReligions();
+const muses = api.S.religions.find((r) => r.id === "muses");
+check("second player founds muses, oracle kept", !!muses && muses.owner === 1 && muses.holyCityId === p1RelCity.id &&
+  p1RelCity.religion === "muses" && api.S.religions.filter((r) => r.id === "oracle").length === 1 && oracle.owner === 0);
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner === 0);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const spCap = api.S.cities[0];
+api.foundReligion(0, "oracle");
+api.foundCity(api.spawn("settler", 0, spCap.x + 2 <= 25 ? spCap.x + 2 : spCap.x - 2, spCap.y));
+api.foundCity(api.spawn("settler", 0, spCap.x + 12 <= 25 ? spCap.x + 12 : spCap.x - 12, spCap.y));
+const spNear = api.S.cities[1];
+const spFar = api.S.cities[2];
+spNear.relPressure = 0;
+spFar.relPressure = 0;
+api.processEconomy();
+check("pressure grows from neighbor source", spNear.relPressure >= 1 && spNear.religion === null);
+check("isolated city untouched", spFar.relPressure === 0 && spFar.religion === null);
+for (let i = 0; i < 6 && spNear.religion !== "oracle"; i++) api.processEconomy();
+check("city converts at pressure 5", spNear.religion === "oracle" && spNear.relPressure === 0 && spFar.religion === null);
+
+spCap.pop = 3; spCap.buildings = []; spCap.producing = null; spCap.foodStored = 0;
+spNear.pop = 3; spNear.buildings = []; spNear.producing = null; spNear.foodStored = 0;
+check("holy city +2 science before multipliers", api.cityYields(spCap).sci === api.cityYields(spNear).sci + 2 &&
+  api.cityYields(spNear).sci === 2 + Math.floor(3 / 2));
+spCap.buildings = ["library"];
+check("holy bonus multiplied by library", api.cityYields(spCap).sci === Math.round((2 + 1 + 2) * 1.5));
+spCap.buildings = [];
+spNear.culture = 0; spNear.buildings = [];
+spFar.culture = 0; spFar.buildings = [];
+api.processEconomy();
+check("religious city +1 culture per turn", spNear.culture === 2 && spFar.culture === 1);
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner === 0);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const seaCap = api.S.cities[0];
+api.S.players[0].techs.push("sailing");
+const coastTiles = [];
+for (let i = 0; i < api.S.map.length; i++) {
+  const x = i % 26, y = (i / 26) | 0;
+  if (api.S.map[i] === 0) continue;
+  const w = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => {
+    const wx = x + dx, wy = y + dy;
+    return wx >= 0 && wy >= 0 && wx < 26 && wy < 18 && api.S.map[wy * 26 + wx] === 0;
+  });
+  if (w) coastTiles.push({ x, y, comp: api.S.waterComp[(y + w[1]) * 26 + (x + w[0])] });
+}
+let seaPair = null;
+for (let i = 0; i < coastTiles.length && !seaPair; i++)
+  for (let j = i + 1; j < coastTiles.length && !seaPair; j++) {
+    const a = coastTiles[i], b = coastTiles[j];
+    if (a.comp !== b.comp) continue;
+    if (Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= 3) continue;
+    if (Math.max(Math.abs(a.x - seaCap.x), Math.abs(a.y - seaCap.y)) <= 3) continue;
+    if (Math.max(Math.abs(b.x - seaCap.x), Math.abs(b.y - seaCap.y)) <= 3) continue;
+    seaPair = [a, b];
+  }
+if (seaPair) {
+  api.foundCity(api.spawn("settler", 0, seaPair[0].x, seaPair[0].y));
+  api.foundCity(api.spawn("settler", 0, seaPair[1].x, seaPair[1].y));
+  api.S.cities[1].religion = "sungod";
+  api.S.cities[2].relPressure = 0;
+  api.processEconomy();
+  check("sea link adds pressure", api.S.cities[2].relPressure === 1 && api.S.cities[2].religion === null);
+  for (let i = 0; i < 5 && api.S.cities[2].religion !== "sungod"; i++) api.processEconomy();
+  check("sea spread converts", api.S.cities[2].religion === "sungod");
+} else {
+  check("sea link adds pressure", false);
+  check("sea spread converts", false);
+}
+
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+api.foundReligion(0, "oracle");
+api.save();
+const rawRel = JSON.parse(store["civ1_save"]);
+delete rawRel.religions;
+rawRel.cities.forEach((c) => { delete c.religion; delete c.relPressure; });
+store["civ1_save"] = JSON.stringify(rawRel);
+check("old save without religion fields migrates", api.load() === true && Array.isArray(api.S.religions) &&
+  api.S.religions.length === 0 && api.S.cities.every((c) => c.religion === null && c.relPressure === 0));
+let relMigErr = null;
+try { api.processEconomy(); api.spreadReligions(); } catch (e) { relMigErr = e; }
+check("religion logic stable after migration", relMigErr === null);
+
 if (!mutation) {
   const expectFail = { a: "FAIL granary +2 food", b: "FAIL processEconomy updates borders after growth" };
   for (const m of ["a", "b"]) {

@@ -4,6 +4,7 @@ import {
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   computeVision, getState, getVisible,
   relKey, atWar, declareWar, offerPeace, strengthOf,
+  RELIGIONS, isHolyCity, cityById,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -83,7 +84,7 @@ function buildViewModel() {
     }
   const cities = S.cities
     .filter((c) => S.explored[key(c.x, c.y)])
-    .map((c) => ({ id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner, walls: c.buildings.includes("walls") }));
+    .map((c) => ({ id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner, walls: c.buildings.includes("walls"), religion: c.religion || null }));
   const units = S.units
     .filter((u) => (u.owner === 0 || visible[key(u.x, u.y)]) && S.explored[key(u.x, u.y)])
     .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === 0 && u.moves > 0, icon: UNITS[u.type].icon }));
@@ -155,6 +156,7 @@ function renderTopbar() {
     </div>
     <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
     <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
+    <button class="civ-tech-btn" id="civ-religion">Религия</button>
     <button class="civ-tech-btn" id="civ-tech">Технологии</button>
     <button class="civ-end" id="civ-end">Конец хода</button>
   `;
@@ -164,6 +166,7 @@ function renderTopbar() {
   };
   document.getElementById("civ-render-toggle").onclick = () => swapRenderer(rendererMode === "3d" ? "2d" : "3d");
   document.getElementById("civ-diplo").onclick = showDiplo;
+  document.getElementById("civ-religion").onclick = showReligion;
   document.getElementById("civ-tech").onclick = showTech;
   document.getElementById("civ-end").onclick = () => { endTurn(); refresh(); };
 }
@@ -276,6 +279,9 @@ function showCity(c) {
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
       ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
       ${c.buildings.length ? `<div class="civ-yields">Постройки: ${c.buildings.map((b) => BUILDINGS[b].name).join(", ")}</div>` : ""}
+      ${c.religion
+        ? `<div class="civ-yields">Религия: ${RELIGIONS[c.religion].icon} ${RELIGIONS[c.religion].name}${isHolyCity(c) ? " · святой город" : ""}</div>`
+        : `<div class="civ-yields">Религии нет</div>`}
       <h3>Производить:</h3>
       <div class="civ-prod-list">
         ${opts.map((o) => `
@@ -386,6 +392,44 @@ function showDiplo() {
       refresh();
     };
   });
+}
+
+function showReligion() {
+  closeModal();
+  const S = getState();
+  const founded = S.religions || [];
+  const mine = founded.find((r) => r.owner === 0) || null;
+  const mineHoly = mine ? cityById(mine.holyCityId) : null;
+  const myRelCities = S.cities.filter((c) => c.owner === 0 && c.religion);
+  const m = document.createElement("div");
+  m.className = "civ-modal";
+  m.id = "civ-modal";
+  m.innerHTML = `
+    <div class="civ-dialog civ-techs">
+      <h2>🕯 Религия</h2>
+      ${mine
+        ? `<div class="civ-yields">Ваша религия: ${RELIGIONS[mine.id].icon} ${RELIGIONS[mine.id].name} · священный город ${escapeHtml(mineHoly ? mineHoly.name : "—")} (ход ${mine.turn})</div>`
+        : `<div class="civ-yields">Вы не основали религию</div>`}
+      <div class="civ-prod-list">
+        ${Object.entries(RELIGIONS).map(([id, r]) => {
+          const f = founded.find((x) => x.id === id);
+          if (!f) return `<div class="civ-prod"><b>${r.icon} ${r.name}</b><span>не основана</span><span>${TECHS[r.tech].name}</span></div>`;
+          const holy = cityById(f.holyCityId);
+          const founder = S.players[f.owner];
+          const cnt = S.cities.filter((c) => c.religion === id).length;
+          return `<div class="civ-prod">
+            <b>${r.icon} ${r.name}</b>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${founder.color};margin-right:6px;vertical-align:middle"></span>${escapeHtml(founder.name)} · священный город ${escapeHtml(holy ? holy.name : "—")} (ход ${f.turn})</span>
+            <span>городов: ${cnt}</span>
+          </div>`;
+        }).join("")}
+      </div>
+      <div class="civ-yields">Ваши религиозные города: ${myRelCities.length ? myRelCities.map((c) => `${escapeHtml(c.name)} ${RELIGIONS[c.religion].icon}`).join(", ") : "нет"}</div>
+      <button class="btn text" id="civ-close">Закрыть</button>
+    </div>
+  `;
+  rootEl.appendChild(m);
+  document.getElementById("civ-close").onclick = closeModal;
 }
 
 function closeModal() {
