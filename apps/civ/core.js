@@ -603,7 +603,7 @@ function cityYields(c) {
   let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat;
   sci = Math.round(sci * e.sciMult);
   if (tradeActive(c)) { prod += 2 * e.tradeMult; sci += 1 * e.tradeMult; }
-  return { food, prod, sci, trade: tradeActive(c) };
+  return { food, prod, sci, trade: tradeActive(c), tradeProd: tradeActive(c) ? 2 * e.tradeMult : 0, tradeSci: tradeActive(c) ? e.tradeMult : 0 };
 }
 
 function techAvailable(p, id) {

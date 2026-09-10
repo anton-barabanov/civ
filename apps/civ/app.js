@@ -269,7 +269,7 @@ function showCity(c) {
     <div class="civ-dialog civ-city">
       <h2>🏛 ${c.name} <span class="civ-pop">население ${c.pop}</span></h2>
       <div class="civ-yields">🌾 ${y.food} (еда) · 🔨 ${y.prod} (произв.) · 🔬 ${y.sci} (наука)</div>
-      ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +2🔨 +1🔬</div>` : ""}
+      ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeProd}🔨 +${y.tradeSci}🔬</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
       ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
       ${c.buildings.length ? `<div class="civ-yields">Постройки: ${c.buildings.map((b) => BUILDINGS[b].name).join(", ")}</div>` : ""}

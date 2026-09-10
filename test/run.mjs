@@ -25,11 +25,29 @@ globalThis.document = {
 globalThis.window = {};
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
-const { execSync } = await import("node:child_process");
-const { writeFileSync } = await import("node:fs");
+const t0 = Date.now();
+
+const { execSync, spawnSync } = await import("node:child_process");
+const { writeFileSync, readFileSync } = await import("node:fs");
 execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
+
+const mutation = process.env.CIV_MUTATION === "a" || process.env.CIV_MUTATION === "b" ? process.env.CIV_MUTATION : null;
+const MUT_TARGETS = {
+  a: ["foodFlat: 2", "foodFlat: 0"],
+  b: ["  recomputeBorders();\n  for (const u of S.units) u.moves = UNITS[u.type].moves;", "  for (const u of S.units) u.moves = UNITS[u.type].moves;"],
+};
+if (mutation) {
+  const src = readFileSync("/tmp/civmod/core.js", "utf8");
+  const [from, to] = MUT_TARGETS[mutation];
+  if (!src.includes(from)) {
+    console.log(`FAIL mutation ${mutation} target not found in core.js copy`);
+    process.exit(2);
+  }
+  writeFileSync("/tmp/civmod/core.js", src.replace(from, to));
+}
+
 const { civApp, debugApi } = await import("/tmp/civmod/app.js");
 const api = debugApi();
 
@@ -320,6 +338,13 @@ check("old save migrates on load", api.load() === true);
 const ownMig = api.getTileOwner();
 check("migration restores borders", Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 &&
   api.S.cities.every((c) => c.culture === 0) && api.S.cities.every((c) => ownMig[c.y * 26 + c.x] === c.owner));
+check("migration restores radius 1 borders", api.S.cities.every((c) => {
+  for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
+    const nx = c.x + dx, ny = c.y + dy;
+    if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && ownMig[ny * 26 + nx] === -1) return false;
+  }
+  return true;
+}));
 api.save();
 const rawNew = JSON.parse(store["civ1_save"]);
 check("tileOwner serialized as array", Array.isArray(rawNew.tileOwner) && rawNew.tileOwner.length === 26 * 18);
@@ -433,6 +458,95 @@ if (aiFx) {
   api.aiTurn();
   check("AI produces new unit type", aiFx.producing && aiFx.producing.k === "unit" && aiFx.producing.id === "catapult");
 }
+
+const coreSrc = readFileSync("apps/civ/core.js", "utf8");
+check("core.js free of DOM access", !(/\bdocument\b/.test(coreSrc) || /\bwindow\b/.test(coreSrc) || coreSrc.includes("createElement") || coreSrc.includes("getContext")));
+const appSrc = readFileSync("apps/civ/app.js", "utf8");
+check("app.js has no static three/renderer3d import", !/^[ \t]*import\s[^\n]*\b(?:three|renderer3d)\b/m.test(appSrc));
+
+{
+  const ids = Object.keys(TT);
+  const have = new Set();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const id of ids)
+      if (!have.has(id) && TT[id].req.every((r) => have.has(r))) { have.add(id); grew = true; }
+  }
+  check("tech tree researchable from empty set", have.size === ids.length);
+}
+
+api.newGame(1);
+const ebSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+api.foundCity(ebSettler);
+const ebCity = api.S.cities[0];
+ebCity.culture = 80;
+api.processEconomy();
+const ownE = api.getTileOwner();
+const farTiles = [];
+for (let dy = -3; dy <= 3; dy++)
+  for (let dx = -3; dx <= 3; dx++) {
+    const nx = ebCity.x + dx, ny = ebCity.y + dy;
+    if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) >= 2) farTiles.push(ny * 26 + nx);
+  }
+check("processEconomy updates borders after growth", farTiles.length > 0 && farTiles.every((k) => ownE[k] === 0));
+
+for (let diff = 0; diff <= 2; diff++) {
+  api.newGame(diff);
+  const sSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+  api.foundCity(sSettler);
+  let stressErr = null;
+  try {
+    for (let t = 0; t < 60; t++) {
+      api.S.over = null;
+      if (!api.S.cities.some((c) => c.owner === 0) && !api.S.units.some((u) => u.owner === 0 && u.type === "settler")) {
+        const to = api.getTileOwner();
+        let li = -1;
+        for (let j = 0; j < api.S.map.length; j++) {
+          const x = j % 26, y = (j / 26) | 0;
+          if (api.S.map[j] !== 0 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) { li = j; break; }
+        }
+        if (li >= 0) api.foundCity(api.spawn("settler", 0, li % 26, (li / 26) | 0));
+      }
+      api.endTurn();
+    }
+  } catch (e) { stressErr = e; }
+  check(`stress diff ${diff}: 60 turns without exceptions`, stressErr === null);
+  const toS = api.getTileOwner();
+  check(`stress diff ${diff}: turn advanced`, api.S.turn >= 61);
+  check(`stress diff ${diff}: map intact`, api.S.map.length === 26 * 18 && api.S.map.every((t) => Number.isInteger(t) && t >= 0 && t <= 5));
+  check(`stress diff ${diff}: tileOwner matches cities`, Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 &&
+    api.S.cities.every((c) => toS[c.y * 26 + c.x] === c.owner) &&
+    toS.every((o, i) => o === -1 || api.S.cities.some((c) => c.owner === o &&
+      Math.max(Math.abs(c.x - (i % 26)), Math.abs(c.y - ((i / 26) | 0))) <= api.cityRadius(c))));
+  check(`stress diff ${diff}: units within map`, api.S.units.every((u) => u.x >= 0 && u.y >= 0 && u.x < 26 && u.y < 18));
+  check(`stress diff ${diff}: unit types valid`, api.S.units.every((u) => !!UT[u.type]));
+  check(`stress diff ${diff}: buildings valid`, api.S.cities.every((c) => c.buildings.every((b) => !!BT[b])));
+}
+
+api.newGame(1);
+const obAtt = api.spawn("warrior", 0, 5, 5);
+const obDef = api.spawn("settler", 1, 6, 5);
+delete obAtt.atkBonus;
+delete obDef.atkBonus;
+api.save();
+check("old save loaded with bonusless units", api.load() === true && api.S.units.every((u) => !("atkBonus" in u)));
+const ldAtt = api.S.units.find((u) => u.id === obAtt.id);
+const ldDef = api.S.units.find((u) => u.id === obDef.id);
+ldAtt.moves = 1;
+api.attack(ldAtt, ldDef.x, ldDef.y);
+check("combat works after old-save load", !(api.S.units.some((u) => u.id === obAtt.id) && api.S.units.some((u) => u.id === obDef.id)));
+
+if (!mutation) {
+  const expectFail = { a: "FAIL granary +2 food", b: "FAIL processEconomy updates borders after growth" };
+  for (const m of ["a", "b"]) {
+    const r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m } });
+    check(`mutation ${m} caught by tests`, r.status !== 0 && r.status !== null && (r.stdout || "").includes(expectFail[m]));
+  }
+}
+
+check("suite within time budget", Date.now() - t0 < 20000);
 
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
