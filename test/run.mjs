@@ -1569,6 +1569,182 @@ check("AI upgrades one unit per turn at peace",
   api.S.units.filter((u) => u.owner === 1 && u.type === "warrior").length === 2 &&
   api.S.players[1].gold === 250);
 
+api.newGame(1);
+check("newGame initializes gp fields", api.S.players.every((p) => p.gpPoints === 0 && p.gpNext === 30 && p.gpRotate === 0));
+check("great people unit data", ["gp_scientist", "gp_engineer", "gp_artist", "gp_prophet"].every((t) => {
+  const d = UT[t];
+  return d && d.gp && d.atk === 0 && d.def === 1 && d.moves === 2 && d.cost === 0 &&
+    d.tech === null && d.upgrade === null && !!d.icon && !!d.letter;
+}));
+check("GREAT_PEOPLE table exposed", !!api.GREAT_PEOPLE && ["scientist", "engineer", "artist", "prophet"].every((k) =>
+  api.GREAT_PEOPLE[k] && api.GREAT_PEOPLE[k].name && api.GREAT_PEOPLE[k].icon && api.GREAT_PEOPLE[k].desc) &&
+  JSON.stringify(api.GP_ORDER) === '["scientist","engineer","artist","prophet"]');
+
+const gpAppSrc = readFileSync("apps/civ/app.js", "utf8");
+check("GP filtered from production list, action button in panel",
+  gpAppSrc.includes("!d.gp") && gpAppSrc.includes('id="civ-gp"') && gpAppSrc.includes("useGreatPerson"));
+check("3D models for 4 great people", readFileSync("apps/civ/models3d.js", "utf8")
+  .split("gp_scientist").length === 2 && ["gp_engineer", "gp_artist", "gp_prophet"].every((t) =>
+  readFileSync("apps/civ/models3d.js", "utf8").includes(`"${t}"`)));
+
+api.S.units = [];
+api.foundCity(api.spawn("settler", 0, cultSpots()[0][0], cultSpots()[0][1]));
+const gpHome = api.S.cities[0];
+check("buyForGold refuses GP units", api.buyForGold(gpHome.id, "unit", "gp_scientist").ok === false &&
+  !api.S.units.some((u) => UT[u.type].gp));
+
+const gpPair = freeLandPair();
+const gpAtt = api.spawn("gp_prophet", 0, gpPair[0][0], gpPair[0][1]);
+const gpPrey = api.spawn("settler", 1, gpPair[1][0], gpPair[1][1]);
+api.declareWar(0, 1);
+gpAtt.moves = 2;
+api.attack(gpAtt, gpPrey.x, gpPrey.y);
+check("GP cannot attack", api.S.units.includes(gpPrey) && api.S.units.includes(gpAtt) && gpAtt.moves === 2);
+api.makePeace(0, 1);
+api.S.units = api.S.units.filter((u) => u !== gpPrey && u !== gpAtt);
+
+gpHome.pop = 1; gpHome.buildings = []; gpHome.religion = null; gpHome.producing = null;
+api.S.players[0].researching = null;
+api.S.players[0].gpPoints = 0;
+api.processEconomy();
+check("no culture bonus gives 0 gp points", api.S.players[0].gpPoints === 0);
+gpHome.buildings = ["temple"];
+const gpCult0 = gpHome.culture;
+api.S.players[0].gpPoints = 0;
+api.processEconomy();
+check("gp points are floor of culture growth", gpHome.culture === gpCult0 + 3 && api.S.players[0].gpPoints === 1);
+gpHome.religion = "oracle";
+api.S.players[0].gpPoints = 0;
+api.processEconomy();
+check("temple plus religion gives 2 gp points", api.S.players[0].gpPoints === 2);
+
+api.S.players[0].gpPoints = 28;
+api.processEconomy();
+check("GP born at threshold in city", api.S.units.some((u) => u.type === "gp_scientist" && u.x === gpHome.x && u.y === gpHome.y));
+check("birth spends points and raises threshold", api.S.players[0].gpPoints === 0 &&
+  api.S.players[0].gpNext === 45 && api.S.players[0].gpRotate === 1);
+check("birth logged", api.S.log.some((l) => l.includes("родился в") && l.includes("Учёный")));
+
+api.S.players[0].gpPoints = 43;
+api.processEconomy();
+check("second birth engineer, threshold 68", api.S.units.filter((u) => u.type === "gp_engineer").length === 1 &&
+  api.S.players[0].gpNext === 68 && api.S.players[0].gpRotate === 2);
+api.S.players[0].gpPoints = 66;
+api.processEconomy();
+api.S.players[0].gpPoints = 100;
+api.processEconomy();
+const gpBorn0 = api.S.units.filter((u) => UT[u.type].gp).length;
+api.S.players[0].gpPoints = 999;
+api.processEconomy();
+check("round-robin scientist-engineer-artist-prophet-scientist",
+  api.S.units.filter((u) => u.type === "gp_scientist").length === 2 &&
+  api.S.units.filter((u) => u.type === "gp_engineer").length === 1 &&
+  api.S.units.filter((u) => u.type === "gp_artist").length === 1 &&
+  api.S.units.filter((u) => u.type === "gp_prophet").length === 1);
+check("at most one GP birth per player per turn", api.S.units.filter((u) => UT[u.type].gp).length === gpBorn0 + 1);
+
+api.S.units = api.S.units.filter((u) => !UT[u.type].gp);
+api.foundCity(api.spawn("settler", 0, cultSpots()[1][0], cultSpots()[1][1]));
+const gpSecond = api.S.cities[api.S.cities.length - 1];
+gpHome.pop = 2; gpSecond.pop = 5;
+api.S.players[0].gpPoints = api.S.players[0].gpNext;
+api.processEconomy();
+check("GP born in most populous city", api.S.units[api.S.units.length - 1].x === gpSecond.x &&
+  api.S.units[api.S.units.length - 1].y === gpSecond.y);
+api.S.units = api.S.units.filter((u) => !UT[u.type].gp);
+gpHome.pop = 5; gpSecond.pop = 5;
+api.S.players[0].gpPoints = api.S.players[0].gpNext;
+api.processEconomy();
+check("pop tie broken by smaller city id", api.S.units[api.S.units.length - 1].x === gpHome.x &&
+  api.S.units[api.S.units.length - 1].y === gpHome.y);
+api.S.units = api.S.units.filter((u) => !UT[u.type].gp);
+
+const gpEng = api.spawn("gp_engineer", 0, gpHome.x, gpHome.y);
+gpHome.prodStored = 17;
+const gpEngR = api.useGreatPerson(gpEng.id);
+check("engineer adds 300 production and is consumed", gpEngR.ok === true && gpHome.prodStored === 317 &&
+  !api.S.units.includes(gpEng));
+api.foundCity(api.spawn("settler", 1, cultSpots()[2][0], cultSpots()[2][1]));
+const gpForeign = api.S.cities[api.S.cities.length - 1];
+const gpEng2 = api.spawn("gp_engineer", 0, gpForeign.x, gpForeign.y);
+const gpEng2R = api.useGreatPerson(gpEng2.id);
+check("engineer refused outside own city", gpEng2R.ok === false && gpEng2R.reason.includes("своём городе") &&
+  api.S.units.includes(gpEng2) && gpForeign.prodStored === 0);
+
+const gpProph = api.spawn("gp_prophet", 0, gpSecond.x, gpSecond.y);
+const gpProphR = api.useGreatPerson(gpProph.id);
+check("prophet founds religion in standing city", gpProphR.ok === true &&
+  api.S.religions.some((r) => r.id === "oracle" && r.owner === 0 && r.holyCityId === gpSecond.id) &&
+  gpSecond.religion === "oracle" && !api.S.units.includes(gpProph));
+api.foundReligion(0, "muses");
+api.foundReligion(0, "sungod");
+const gpProph2 = api.spawn("gp_prophet", 0, gpHome.x, gpHome.y);
+api.S.players[0].gold = 100;
+const gpProph2R = api.useGreatPerson(gpProph2.id);
+check("prophet fallback +50 gold when all religions founded", gpProph2R.ok === true &&
+  api.S.players[0].gold === 150 && !api.S.units.includes(gpProph2));
+
+api.S.cities = api.S.cities.filter((c) => c === gpHome);
+gpHome.pop = 1; gpHome.culture = 0; gpHome.buildings = []; gpHome.religion = null;
+api.recomputeBorders();
+const gpArt = api.spawn("gp_artist", 0, gpHome.x, gpHome.y);
+const artTileX = gpHome.x + 2 <= 25 ? gpHome.x + 2 : gpHome.x - 2;
+const artBefore = api.getTileOwner()[gpHome.y * 26 + artTileX];
+const gpArtR = api.useGreatPerson(gpArt.id);
+check("artist adds 100 culture, borders grow instantly", gpArtR.ok === true && gpHome.culture === 100 &&
+  !api.S.units.includes(gpArt) && artBefore !== 0 &&
+  api.getTileOwner()[gpHome.y * 26 + artTileX] === 0);
+
+const gpSciPair = freeLandPair();
+api.S.players[0].techs = [];
+api.S.players[0].researching = "agriculture";
+api.S.players[0].progress = 7;
+const gpSci = api.spawn("gp_scientist", 0, gpSciPair[0][0], gpSciPair[0][1]);
+const gpSciR = api.useGreatPerson(gpSci.id);
+check("scientist grants cheapest tech in the field and is consumed", gpSciR.ok === true &&
+  api.S.players[0].techs.includes("agriculture") && api.S.players[0].researching === null &&
+  api.S.players[0].progress === 0 && !api.S.units.includes(gpSci));
+api.S.players[0].techs = Object.keys(api.TECHS);
+const gpSci2 = api.spawn("gp_scientist", 0, gpSciPair[0][0], gpSciPair[0][1]);
+const gpSci2R = api.useGreatPerson(gpSci2.id);
+check("scientist refused when tech tree exhausted", gpSci2R.ok === false && api.S.units.includes(gpSci2));
+
+api.newGame(1);
+const gpAiSet = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+api.foundCity(gpAiSet);
+const gpAiCity = api.S.cities.find((c) => c.owner === 1);
+api.S.units = api.S.units.filter((u) => u.owner !== 1 || u.type !== "warrior");
+const gpAiSci = api.spawn("gp_scientist", 1, gpAiCity.x, gpAiCity.y);
+const gpAiTechs0 = api.S.players[1].techs.length;
+const gpAiRnd = Math.random;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = gpAiRnd; }
+check("AI uses great person in its city", !api.S.units.includes(gpAiSci) &&
+  api.S.players[1].techs.length === gpAiTechs0 + 1);
+
+api.newGame(1);
+api.save();
+const rawGp = JSON.parse(store["civ1_save"]);
+rawGp.players.forEach((p) => { delete p.gpPoints; delete p.gpNext; delete p.gpRotate; });
+store["civ1_save"] = JSON.stringify(rawGp);
+check("old save migrates gp fields", api.load() === true &&
+  api.S.players.every((p) => p.gpPoints === 0 && p.gpNext === 30 && p.gpRotate === 0));
+api.S.players[0].gpPoints = 12;
+api.S.players[0].gpNext = 77;
+api.S.players[0].gpRotate = 3;
+api.save();
+check("gp fields survive save-load roundtrip", api.load() === true &&
+  api.S.players[0].gpPoints === 12 && api.S.players[0].gpNext === 77 && api.S.players[0].gpRotate === 3);
+
+api.newGame(1);
+const gft0 = api.grantFreeTech(api.S.players[0]);
+check("grantFreeTech gives cheapest available", gft0 === "agriculture" && api.S.players[0].techs.includes("agriculture"));
+api.S.players[0].researching = "archery";
+api.S.players[0].progress = 10;
+const gft1 = api.grantFreeTech(api.S.players[0]);
+check("grantFreeTech resets matching research", gft1 === "archery" &&
+  api.S.players[0].researching === null && api.S.players[0].progress === 0);
+
 if (!mutation) {
   const expectFail = {
     a: "FAIL granary +2 food",

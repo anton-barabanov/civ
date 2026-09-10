@@ -23,6 +23,10 @@ const UNITS = {
   crossbowman: { name: "Арбалетчик", letter: "Ар", icon: "🎯", atk: 6, def: 5, moves: 1, cost: 55, tech: "machinery", upgrade: null },
   knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism", res: ["iron", "horses"], upgrade: null },
   musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder", upgrade: null },
+  gp_scientist: { name: "Учёный", letter: "У", icon: "🔬", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "scientist" },
+  gp_engineer: { name: "Инженер", letter: "И", icon: "🔧", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "engineer" },
+  gp_artist: { name: "Художник", letter: "Х", icon: "🎨", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "artist" },
+  gp_prophet: { name: "Пророк", letter: "П", icon: "🙏", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "prophet" },
 };
 
 const DIFFICULTIES = [
@@ -93,6 +97,16 @@ const RESOURCES = {
   horses: { name: "Лошади", icon: "🐎", terrains: [TILE.GRASS, TILE.PLAINS] },
   marble: { name: "Мрамор", icon: "🏛", terrains: [TILE.HILLS] },
 };
+
+const GREAT_PEOPLE = {
+  scientist: { name: "Учёный", icon: "🔬", desc: "Бесплатная технология" },
+  engineer: { name: "Инженер", icon: "🔧", desc: "+300 производства в город" },
+  artist: { name: "Художник", icon: "🎨", desc: "+100 культуры в город" },
+  prophet: { name: "Пророк", icon: "🙏", desc: "Основать религию или +50 золота" },
+};
+
+const GP_ORDER = ["scientist", "engineer", "artist", "prophet"];
+const GP_BASE_THRESHOLD = 30;
 
 const REL_SPREAD_RADIUS = 3;
 const REL_SPREAD_THRESHOLD = 5;
@@ -444,6 +458,9 @@ function newGame(diff = 1, opponents = 1) {
       researching: null,
       progress: 0,
       gold: 50,
+      gpPoints: 0,
+      gpNext: GP_BASE_THRESHOLD,
+      gpRotate: 0,
       isHuman: i === 0,
     })),
     units: [],
@@ -601,6 +618,7 @@ function captureCity(c, owner) {
 }
 
 function attack(att, x, y) {
+  if (UNITS[att.type].gp) return;
   const defs = unitsAt(x, y).filter((u) => u.owner !== att.owner);
   const city = cityAt(x, y);
   const def = defs[0];
@@ -781,17 +799,18 @@ function isHolyCity(c) {
   return S.religions.some((r) => r.holyCityId === c.id);
 }
 
-function foundReligion(owner, id) {
+function foundReligion(owner, id, holyCityId) {
   const def = RELIGIONS[id];
   if (!def || S.religions.some((r) => r.id === id)) return false;
-  const capital = S.cities.filter((c) => c.owner === owner).sort((a, b) => a.id - b.id)[0];
-  if (!capital) return false;
-  S.religions.push({ id, tech: def.tech, owner, holyCityId: capital.id, turn: S.turn });
-  capital.religion = id;
-  capital.relPressure = 0;
+  const holy = (holyCityId != null ? cityById(holyCityId) : null) ||
+    S.cities.filter((c) => c.owner === owner).sort((a, b) => a.id - b.id)[0];
+  if (!holy) return false;
+  S.religions.push({ id, tech: def.tech, owner, holyCityId: holy.id, turn: S.turn });
+  holy.religion = id;
+  holy.relPressure = 0;
   addLog(owner === 0
-    ? `В ${capital.name} основана религия ${def.name}`
-    : `${S.players[owner].name}: в городе ${capital.name} основана религия ${def.name}`);
+    ? `В ${holy.name} основана религия ${def.name}`
+    : `${S.players[owner].name}: в городе ${holy.name} основана религия ${def.name}`);
   return true;
 }
 
@@ -873,6 +892,15 @@ function techAvailable(p, id) {
   return !p.techs.includes(id) && t.req.every((r) => p.techs.includes(r));
 }
 
+function grantFreeTech(p) {
+  const avail = Object.keys(TECHS).filter((t) => techAvailable(p, t))
+    .sort((a, b) => TECHS[a].cost - TECHS[b].cost);
+  if (!avail.length) return null;
+  p.techs.push(avail[0]);
+  if (p.researching === avail[0]) { p.researching = null; p.progress = 0; }
+  return avail[0];
+}
+
 function resourceConnected(pIdx, r) {
   if (!S.res || !S.tileOwner) return false;
   for (let i = 0; i < W * H; i++)
@@ -925,7 +953,9 @@ function processEconomy() {
     const p = S.players[c.owner];
     const y = cityYields(c);
     const e = buildingEffects(c);
-    c.culture = (c.culture || 0) + 1 + e.culture + (c.religion ? 1 : 0);
+    const cultGrowth = 1 + e.culture + (c.religion ? 1 : 0);
+    c.culture = (c.culture || 0) + cultGrowth;
+    p.gpPoints = (p.gpPoints || 0) + Math.floor(cultGrowth / 2);
     const surplus = y.food - c.pop * 2;
     c.foodStored = Math.max(0, c.foodStored + surplus);
     const need = 10 + c.pop * 5;
@@ -949,13 +979,8 @@ function processEconomy() {
             S.wonders.push({ id: c.producing.id, owner: c.owner, cityId: c.id, turn: S.turn });
             addLog(`${S.players[c.owner].name}: в городе ${c.name} построено чудо ${def.name}`);
             if (def.effects.freeTech) {
-              const avail = Object.keys(TECHS).filter((t) => techAvailable(p, t))
-                .sort((a, b) => TECHS[a].cost - TECHS[b].cost);
-              if (avail.length) {
-                p.techs.push(avail[0]);
-                if (p.researching === avail[0]) { p.researching = null; p.progress = 0; }
-                addLog(`Оракул дарует знание: ${TECHS[avail[0]].name}`);
-              }
+              const free = grantFreeTech(p);
+              if (free) addLog(`Оракул дарует знание: ${TECHS[free].name}`);
             }
           }
           c.producing = null;
@@ -1006,6 +1031,19 @@ function processEconomy() {
       }
     }
   }
+  for (let i = 0; i < S.players.length; i++) {
+    const p = S.players[i];
+    if ((p.gpPoints || 0) < (p.gpNext ?? GP_BASE_THRESHOLD)) continue;
+    const cities = S.cities.filter((c) => c.owner === i);
+    if (!cities.length) continue;
+    const home = cities.sort((a, b) => b.pop - a.pop || a.id - b.id)[0];
+    const kind = GP_ORDER[(p.gpRotate || 0) % GP_ORDER.length];
+    p.gpPoints -= p.gpNext ?? GP_BASE_THRESHOLD;
+    p.gpNext = Math.ceil((p.gpNext ?? GP_BASE_THRESHOLD) * 1.5);
+    p.gpRotate = ((p.gpRotate || 0) + 1) % GP_ORDER.length;
+    spawn("gp_" + kind, i, home.x, home.y);
+    addLog(`Великий ${GREAT_PEOPLE[kind].name} родился в ${home.name}`);
+  }
   recomputeBorders();
   for (const u of S.units) u.moves = UNITS[u.type].moves;
   checkFoundReligions();
@@ -1018,6 +1056,7 @@ function buyForGold(cityId, k, id) {
   if (k === "wonder") return { ok: false, reason: "чудеса нельзя купить за золото" };
   const def = k === "unit" ? UNITS[id] : k === "building" ? BUILDINGS[id] : null;
   if (!def) return { ok: false, reason: "неизвестный элемент" };
+  if (k === "unit" && def.gp) return { ok: false, reason: "великих людей нельзя купить" };
   const p = S.players[c.owner];
   if (def.tech && !p.techs.includes(def.tech)) return { ok: false, reason: `нужна технология: ${TECHS[def.tech].name}` };
   if (k === "unit" && !unitAvailable(c.owner, id)) {
@@ -1044,6 +1083,40 @@ function buyForGold(cityId, k, id) {
     c.buildings.push(id);
     if (c.owner === 0) addLog(`${c.name}: за ${price}🪙 построена ${def.name}`);
   }
+  return { ok: true };
+}
+
+function useGreatPerson(unitId) {
+  const u = unitById(unitId);
+  if (!u) return { ok: false, reason: "юнит не найден" };
+  const def = UNITS[u.type];
+  if (!def.gp) return { ok: false, reason: "не великий человек" };
+  const p = S.players[u.owner];
+  const c = cityAt(u.x, u.y);
+  if (def.gp !== "scientist" && (!c || c.owner !== u.owner))
+    return { ok: false, reason: "должен быть в своём городе" };
+  if (def.gp === "scientist") {
+    const t = grantFreeTech(p);
+    if (!t) return { ok: false, reason: "нет доступных технологий" };
+    addLog(`${GREAT_PEOPLE.scientist.name} дарует знание: ${TECHS[t].name}`);
+  } else if (def.gp === "engineer") {
+    c.prodStored += 300;
+    addLog(`${GREAT_PEOPLE.engineer.name} ускоряет ${c.name} (+300🔨)`);
+  } else if (def.gp === "artist") {
+    c.culture = (c.culture || 0) + 100;
+    recomputeBorders();
+    addLog(`${GREAT_PEOPLE.artist.name} прославляет ${c.name} (+100 культуры)`);
+  } else if (def.gp === "prophet") {
+    const relId = Object.keys(RELIGIONS).find((id) => !S.religions.some((r) => r.id === id));
+    if (relId) {
+      foundReligion(u.owner, relId, c.id);
+    } else {
+      p.gold += 50;
+      addLog(`${GREAT_PEOPLE.prophet.name} приносит 50🪙`);
+    }
+  }
+  S.units = S.units.filter((x) => x !== u);
+  if (S.sel === u.id) S.sel = null;
   return { ok: true };
 }
 
@@ -1122,6 +1195,19 @@ function aiTurnOne(owner) {
   }
   for (const u of [...S.units]) {
     if (u.owner !== owner || !S.units.includes(u)) continue;
+    if (UNITS[u.type].gp) {
+      const home = S.cities.filter((c) => c.owner === owner)
+        .sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y) || a.id - b.id)[0];
+      if (home) {
+        while (u.moves > 0 && (u.x !== home.x || u.y !== home.y)) {
+          const before = u.x + "," + u.y;
+          stepToward(u, home.x, home.y);
+          if (u.x + "," + u.y === before) break;
+        }
+        if (u.x === home.x && u.y === home.y) useGreatPerson(u.id);
+      }
+      continue;
+    }
     if (u.type === "settler") {
       const home = landCompOf(u.x, u.y);
       let spot = null;
@@ -1395,6 +1481,9 @@ function load() {
       if (!("researching" in p)) p.researching = null;
       if (typeof p.progress !== "number") p.progress = 0;
       if (typeof p.gold !== "number") p.gold = 50;
+      if (typeof p.gpPoints !== "number") p.gpPoints = 0;
+      if (typeof p.gpNext !== "number") p.gpNext = GP_BASE_THRESHOLD;
+      if (typeof p.gpRotate !== "number") p.gpRotate = 0;
       if (!Array.isArray(p.cityNames)) {
         const nat = NATIONS.find((n) => n.name === p.name);
         const taken = new Set(S.cities.filter((c) => c.owner === i).map((c) => c.name));
@@ -1411,11 +1500,11 @@ export function getVisible() { return visible; }
 
 export {
   TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, RESOURCES, W, H, TS, SAVE_KEY,
-  CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD,
+  CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD, GREAT_PEOPLE, GP_ORDER,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
-  foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects,
+  foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
   unitAvailable, resourceConnected, hasMarble, wonderCost,
 };
@@ -1430,6 +1519,8 @@ export function debugApi() {
     get NATIONS() { return NATIONS; },
     get RELIGIONS() { return RELIGIONS; },
     get RESOURCES() { return RESOURCES; },
+    get GREAT_PEOPLE() { return GREAT_PEOPLE; },
+    get GP_ORDER() { return GP_ORDER; },
     get CULTURE_WIN_CITIES() { return CULTURE_WIN_CITIES; },
     get CULTURE_WIN_THRESHOLD() { return CULTURE_WIN_THRESHOLD; },
     getNations: () => NATIONS,
@@ -1466,6 +1557,8 @@ export function debugApi() {
     spreadReligions,
     isHolyCity,
     techAvailable,
+    grantFreeTech,
+    useGreatPerson,
     cityYields,
     buildingEffects,
     playerEffects,

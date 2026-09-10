@@ -6,7 +6,7 @@ import {
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf,
   RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
-  CULTURE_WIN_CITIES, legendaryCities,
+  CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
@@ -212,6 +212,12 @@ function renderPanel() {
     if (ownCity && ownCity.owner === 0) {
       body += `<button class="btn text" id="civ-city">🏛 Открыть город</button>`;
     }
+    if (u.gp) {
+      const gpDef = GREAT_PEOPLE[u.gp];
+      const inOwnCity = ownCity && ownCity.owner === 0;
+      const gpBlocked = u.gp !== "scientist" && !inOwnCity;
+      body += `<button class="btn primary" id="civ-gp" ${gpBlocked ? `disabled title="Великий человек должен быть в своём городе"` : `title="${gpDef.desc}"`}>✨ ${gpDef.desc}</button>`;
+    }
     const upTo = u.upgrade ? UNITS[u.upgrade] : null;
     if (upTo) {
       const price = upgradeCost(sel);
@@ -257,6 +263,11 @@ function renderPanel() {
   if (ub) ub.onclick = () => {
     const u = unitById(getState().sel);
     if (u && upgradeUnit(u).ok) { save(); refresh(); }
+  };
+  const gb = document.getElementById("civ-gp");
+  if (gb) gb.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u && useGreatPerson(u.id).ok) { save(); refresh(); }
   };
 }
 
@@ -325,7 +336,7 @@ function showCity(c) {
   const y = cityYields(c);
   const p = S.players[0];
   const unitOpts = Object.entries(UNITS)
-    .filter(([, d]) => (!d.tech || p.techs.includes(d.tech)) && (!d.naval || isCoastal(c.x, c.y)))
+    .filter(([, d]) => !d.gp && (!d.tech || p.techs.includes(d.tech)) && (!d.naval || isCoastal(c.x, c.y)))
     .map(([id, d]) => {
       const need = (d.res || []).filter((r) => !resourceConnected(0, r));
       return {

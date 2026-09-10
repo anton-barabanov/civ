@@ -75,6 +75,12 @@ function addFigure(group, ownerMat, bodyR, bodyH, x, z) {
   add(group, headGeo, mat(C.skin), x, bodyH + 0.06, z);
 }
 
+function addSage(group, ownerMat) {
+  addFigure(group, ownerMat, 0.08, 0.34, 0, 0);
+  add(group, geo("u:gpRobe", () => new THREE.ConeGeometry(0.115, 0.32, 7)), ownerMat, 0, 0.16, 0);
+  add(group, geo("u:gpHalo", () => new THREE.TorusGeometry(0.075, 0.012, 6, 12)), mat(C.gold), 0, 0.5, 0).rotation.x = Math.PI / 2;
+}
+
 function addHorse(group) {
   const coat = mat(C.wood);
   add(group, geo("u:horseBody", () => new THREE.BoxGeometry(0.34, 0.13, 0.14)), coat, 0, 0.27, 0);
@@ -238,6 +244,33 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     const gun = add(group, geo("u:musket", () => new THREE.BoxGeometry(0.52, 0.028, 0.028)), woodDark, 0, 0.42, 0.06);
     gun.rotation.z = 0.5;
     add(gun, geo("u:musketTip", () => new THREE.BoxGeometry(0.15, 0.022, 0.022)), metal, 0.3, 0, 0);
+  } else if (unitType === "gp_scientist") {
+    addSage(group, om);
+    add(group, geo("u:gpScroll", () => new THREE.CylinderGeometry(0.035, 0.035, 0.18, 8)), mat(C.sail), 0, 0.3, 0.13).rotation.x = Math.PI / 2;
+    add(group, geo("u:gpScrollEnd", () => new THREE.CylinderGeometry(0.05, 0.05, 0.024, 8)), mat(C.snow), 0, 0.3, 0.22).rotation.x = Math.PI / 2;
+    add(group, geo("u:gpScrollEnd", () => new THREE.CylinderGeometry(0.05, 0.05, 0.024, 8)), mat(C.snow), 0, 0.3, 0.04).rotation.x = Math.PI / 2;
+  } else if (unitType === "gp_engineer") {
+    addSage(group, om);
+    add(group, geo("u:gpGear", () => new THREE.TorusGeometry(0.07, 0.02, 6, 10)), metal, 0.16, 0.33, 0.05);
+    const toothGeo = geo("u:gpGearTooth", () => new THREE.BoxGeometry(0.03, 0.03, 0.022));
+    add(group, toothGeo, metal, 0.16, 0.42, 0.05);
+    add(group, toothGeo, metal, 0.16, 0.24, 0.05);
+    add(group, toothGeo, metal, 0.07, 0.33, 0.05);
+    add(group, toothGeo, metal, 0.25, 0.33, 0.05);
+    add(group, geo("u:gpWrench", () => new THREE.BoxGeometry(0.2, 0.024, 0.024)), mat(C.woodDark), 0.05, 0.44, -0.05).rotation.z = 0.35;
+  } else if (unitType === "gp_artist") {
+    addSage(group, om);
+    add(group, geo("u:gpLyre", () => new THREE.TorusGeometry(0.09, 0.014, 6, 12, Math.PI)), woodDark, 0.16, 0.28, 0.05);
+    const stringGeo = geo("u:gpLyreString", () => new THREE.BoxGeometry(0.008, 0.16, 0.008));
+    add(group, stringGeo, mat(C.gold), 0.11, 0.29, 0.05);
+    add(group, stringGeo, mat(C.gold), 0.16, 0.29, 0.05);
+    add(group, stringGeo, mat(C.gold), 0.21, 0.29, 0.05);
+  } else if (unitType === "gp_prophet") {
+    addSage(group, om);
+    add(group, geo("u:gpTablet", () => new THREE.BoxGeometry(0.075, 0.11, 0.02)), mat(C.stone), 0.13, 0.29, 0.06).rotation.z = 0.12;
+    add(group, geo("u:gpTabletCap", () => new THREE.CylinderGeometry(0.0375, 0.0375, 0.02, 8)), mat(C.stone), 0.136, 0.345, 0.06).rotation.x = Math.PI / 2;
+    add(group, geo("u:gpTablet", () => new THREE.BoxGeometry(0.075, 0.11, 0.02)), mat(C.stone), 0.21, 0.28, 0.06).rotation.z = -0.08;
+    add(group, geo("u:gpTabletCap", () => new THREE.CylinderGeometry(0.0375, 0.0375, 0.02, 8)), mat(C.stone), 0.206, 0.335, 0.06).rotation.x = Math.PI / 2;
   } else if (unitType === "galley") {
     add(group, geo("u:hullG", () => new THREE.BoxGeometry(0.56, 0.1, 0.2)), wood, 0, 0.08, 0);
     add(group, geo("u:bowG", () => new THREE.ConeGeometry(0.09, 0.16, 4)), wood, 0.35, 0.08, 0).rotation.z = -Math.PI / 2;
