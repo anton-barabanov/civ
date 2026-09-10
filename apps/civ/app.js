@@ -5,7 +5,7 @@ import {
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf, offerTechTrade,
-  RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
+  RELIGIONS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
   startImprovement, cancelWork, spreadFaith, declareStateReligion,
@@ -173,6 +173,7 @@ function renderTopbar() {
       </div>
       <div class="civ-sci civ-gold" title="Золото: доход ${gold.income}🪙 − содержание ${gold.upkeep}🪙 = ${netStr}🪙 за ход">🪙 ${p.gold} (${netStr})${goldStrike ? ` <span class="civ-warn">⚠ наука остановлена</span>` : ""}</div>
       <div class="civ-cult" title="Легендарные города: ${legendaryCities(0).length} из ${CULTURE_WIN_CITIES}">🏛 ${legendaryCities(0).length}/${CULTURE_WIN_CITIES}</div>
+      <div class="civ-cult" title="Космический корабль">🚀 ${(S.space[0] || []).length}/${Object.keys(SS_PARTS).length}</div>
       <div class="civ-cult" title="Суммарное счастье городов: счастье − недовольство">😊 ${happinessTotal >= 0 ? "+" : ""}${happinessTotal}</div>
     </div>
     <div class="topbar-row topbar-actions">
@@ -347,17 +348,23 @@ function renderOver() {
     el.className = "civ-modal";
     rootEl.appendChild(el);
   }
-  const type = S.over.type === "culture" ? "culture" : "conquest";
+  const type = S.over.type === "culture" ? "culture" : S.over.type === "space" ? "space" : "conquest";
   const draw = S.over.winner === -1;
   const win = !draw && S.over.winner === 0;
   const winner = S.players[S.over.winner] || S.players[0];
   const title = draw ? "🤝 Ничья"
     : !win ? "💀 Поражение"
-    : type === "culture" ? "🕊 Культурная победа!" : "🏆 Победа завоеванием!";
+    : type === "culture" ? "🕊 Культурная победа!"
+    : type === "space" ? "🚀 Научная победа!"
+    : "🏆 Победа завоеванием!";
   const sub = draw ? "Взаимное уничтожение: цивилизации пали в одной войне."
     : !win
-    ? `${escapeHtml(winner.name)} победили ${type === "culture" ? "культурно" : "завоеванием"}`
-    : type === "culture" ? "Ваши легендарные города — слава веков." : "Все противники повержены.";
+    ? type === "space"
+      ? `${escapeHtml(winner.name)} первыми вышли к звёздам: космический корабль запущен`
+      : `${escapeHtml(winner.name)} победили ${type === "culture" ? "культурно" : "завоеванием"}`
+    : type === "culture" ? "Ваши легендарные города — слава веков."
+    : type === "space" ? `Космический корабль собран за ${S.turn} ходов.`
+    : "Все противники повержены.";
   const myCities = S.cities.filter((c) => c.owner === 0);
   const cultureTotal = myCities.reduce((a, c) => a + (c.culture || 0), 0);
   const cityItems = S.players
@@ -432,7 +439,7 @@ function showCity(c) {
   });
   const opts = [...unitOpts, ...bldOpts];
   const cur = c.producing
-    ? (c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : WONDERS[c.producing.id])
+    ? (c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : c.producing.k === "project" ? SS_PARTS[c.producing.id] : WONDERS[c.producing.id])
     : null;
   const m = document.createElement("div");
   m.className = "civ-modal";
@@ -475,6 +482,17 @@ function showCity(c) {
             <b>${o.name}</b><span>${o.info}</span><span>🔨 ${o.cost}</span>
           </button>`).join("")}
       </div>
+      ${p.techs.includes("rocketry") ? `
+      <h3>🚀 Космический корабль:</h3>
+      <div class="civ-prod-list">
+        ${Object.entries(SS_PARTS).map(([id, d]) => {
+          const built = (S.space[0] || []).includes(id);
+          return `<button class="civ-prod ${c.producing && c.producing.id === id && c.producing.k === "project" ? "sel" : ""}"
+                  data-k="project" data-id="${id}" ${built ? "disabled" : ""}>
+            <b>${d.name}</b><span>${built ? "построено" : "часть космического корабля"}</span><span>🔨 ${d.cost}</span>
+          </button>`;
+        }).join("")}
+      </div>` : ""}
       <button class="btn text" id="civ-close">Закрыть</button>
     </div>
   `;
@@ -489,6 +507,7 @@ function showCity(c) {
   m.querySelectorAll(".civ-prod").forEach((b) => {
     b.onclick = () => {
       if (b.dataset.k === "wonder" && (S.wonders || []).some((w) => w.id === b.dataset.id)) return;
+      if (b.dataset.k === "project" && (S.space[0] || []).includes(b.dataset.id)) return;
       if (b.dataset.k === "unit" && !unitAvailable(0, b.dataset.id)) return;
       if (b.dataset.k === "unit" && b.dataset.id === "missionary" && !c.religion) return;
       c.producing = { k: b.dataset.k, id: b.dataset.id };

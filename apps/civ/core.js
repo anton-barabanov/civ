@@ -63,6 +63,12 @@ const WONDERS = {
   oraclew: { name: "Оракул", icon: "✨", cost: 130, tech: "mysticism", desc: "Бесплатная технология при завершении", effects: { freeTech: 1 } },
 };
 
+const SS_PARTS = {
+  hull: { name: "Корпус корабля", cost: 150 },
+  engine: { name: "Двигатель", cost: 180 },
+  crew: { name: "Модуль экипажа", cost: 200 },
+};
+
 const TECHS = {
   agriculture: { name: "Земледелие", cost: 18, req: [] },
   archery: { name: "Стрельба из лука", cost: 22, req: [] },
@@ -87,6 +93,9 @@ const TECHS = {
   banking: { name: "Банковское дело", cost: 105, req: ["currency", "monarchy"] },
   education: { name: "Образование", cost: 115, req: ["literature", "mathematics"] },
   gunpowder: { name: "Порох", cost: 140, req: ["machinery", "education"] },
+  chemistry: { name: "Химия", cost: 180, req: ["education", "gunpowder"] },
+  electricity: { name: "Электричество", cost: 230, req: ["chemistry"] },
+  rocketry: { name: "Ракетостроение", cost: 300, req: ["electricity"] },
 };
 
 const RELIGIONS = {
@@ -480,6 +489,7 @@ function newGame(diff = 1, opponents = 1) {
     relations: {},
     religions: [],
     wonders: [],
+    space: {},
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
@@ -1163,10 +1173,20 @@ function processEconomy() {
       ? Math.floor(y.prod * 0.5 * (p.isHuman ? 1 : diff.prodMult))
       : y.prod * (p.isHuman ? 1 : diff.prodMult);
     if (c.producing) {
-      const def = c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : WONDERS[c.producing.id];
+      const def = c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : c.producing.k === "project" ? SS_PARTS[c.producing.id] : WONDERS[c.producing.id];
       const cost = c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : def.cost;
       if (c.prodStored >= cost) {
-        if (c.producing.k === "wonder") {
+        if (c.producing.k === "project") {
+          if ((S.space[c.owner] || []).includes(c.producing.id)) {
+            c.prodStored += Math.floor(def.cost / 2);
+            addLog(`${def.name} уже построена — 50% вложений возвращено производству`);
+          } else {
+            c.prodStored -= def.cost;
+            S.space[c.owner] = [...(S.space[c.owner] || []), c.producing.id];
+            addLog(`Построена часть корабля: ${def.name} — ${S.players[c.owner].name}`);
+          }
+          c.producing = null;
+        } else if (c.producing.k === "wonder") {
           const won = S.wonders.find((w) => w.id === c.producing.id);
           if (won) {
             c.prodStored += Math.floor(def.cost / 2);
@@ -1254,6 +1274,7 @@ function buyForGold(cityId, k, id) {
   const c = cityById(cityId);
   if (!c) return { ok: false, reason: "город не найден" };
   if (k === "wonder") return { ok: false, reason: "чудеса нельзя купить за золото" };
+  if (k === "project") return { ok: false, reason: "части корабля нельзя купить за золото" };
   const def = k === "unit" ? UNITS[id] : k === "building" ? BUILDINGS[id] : null;
   if (!def) return { ok: false, reason: "неизвестный элемент" };
   if (k === "unit" && def.gp) return { ok: false, reason: "великих людей нельзя купить" };
@@ -1341,6 +1362,9 @@ function aiTurnOne(owner) {
   const aiRel = p.stateReligion || (S.religions.find((r) => r.owner === owner) || {}).id || null;
   const myUnits = S.units.filter((u) => u.owner === owner);
   const myCities = S.cities.filter((c) => c.owner === owner);
+  const flagship = p.techs.includes("rocketry") && myCities.length >= 3
+    ? myCities.slice().sort((a, b) => cityYields(b).prod - cityYields(a).prod || a.id - b.id)[0]
+    : null;
   const military = () => myUnits.filter((u) => !UNITS[u.type].gp && UNITS[u.type].atk > 0)
     .sort((a, b) => UNITS[a.type].atk - UNITS[b.type].atk);
   if (myCities.length) {
@@ -1394,6 +1418,8 @@ function aiTurnOne(owner) {
         !myUnits.some((u) => u.type === "missionary") &&
         S.cities.some((o) => o.owner !== owner && !atWar(owner, o.owner) && o.religion !== aiRel && dist(c.x, c.y, o.x, o.y) <= 6)) {
         c.producing = { k: "unit", id: "missionary" };
+      } else if (flagship && c === flagship && Object.keys(SS_PARTS).some((id) => !(S.space[owner] || []).includes(id))) {
+        c.producing = { k: "project", id: Object.keys(SS_PARTS).find((id) => !(S.space[owner] || []).includes(id)) };
       } else if (c.pop >= 3 && !c.buildings.includes("library") && Math.random() < 0.35) {
         const avail = ["granary", "library", "temple", "amphitheater", "forge", "market"].filter(
           (b) => !c.buildings.includes(b) && (!BUILDINGS[b].tech || p.techs.includes(BUILDINGS[b].tech))
@@ -1794,6 +1820,14 @@ function checkVictory() {
       return;
     }
   }
+  for (let i = 0; i < S.players.length; i++) {
+    if (!playerAlive(i)) continue;
+    if (Object.keys(SS_PARTS).every((id) => (S.space[i] || []).includes(id))) {
+      S.over = { winner: i, type: "space" };
+      addLog(`${S.players[i].name} строят космический корабль и одерживают научную победу`);
+      return;
+    }
+  }
 }
 
 function endTurn() {
@@ -1833,6 +1867,7 @@ function load() {
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
     if (!Array.isArray(S.religions)) S.religions = [];
     if (!Array.isArray(S.wonders)) S.wonders = [];
+    if (!S.space) S.space = {};
     if (S.over && !S.over.type) S.over.type = "conquest";
     for (const c of S.cities) {
       if (!c.religion) c.religion = null;
@@ -1869,7 +1904,7 @@ export function getState() { return S; }
 export function getVisible() { return visible; }
 
 export {
-  TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, RESOURCES, W, H, TS, SAVE_KEY,
+  TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, SS_PARTS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, RESOURCES, W, H, TS, SAVE_KEY,
   CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD, GREAT_PEOPLE, GP_ORDER,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
@@ -1887,6 +1922,7 @@ export function debugApi() {
     get UNITS() { return UNITS; },
     get BUILDINGS() { return BUILDINGS; },
     get WONDERS() { return WONDERS; },
+    get SS_PARTS() { return SS_PARTS; },
     get NATIONS() { return NATIONS; },
     get RELIGIONS() { return RELIGIONS; },
     get RESOURCES() { return RESOURCES; },
