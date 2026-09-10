@@ -790,7 +790,7 @@ function cityYields(c) {
   sci = Math.round(sci * e.sciMult * pe.sciMult);
   const trade = tradeActive(c);
   const tradeGold = trade ? 2 * e.tradeMult * pe.tradeMult : 0;
-  const gold = 2 + Math.floor(c.pop / 2) + tradeGold;
+  const gold = 3 + Math.floor(c.pop / 2) + tradeGold;
   return { food, prod, sci, gold, trade, tradeGold };
 }
 

@@ -198,6 +198,7 @@ check("AI founded cities", api.S.cities.some((c) => c.owner === 1));
 check("AI research started", api.S.players[1].techs.length >= 1 || api.S.players[1].researching !== null);
 
 api.S.players[0].researching = "agriculture";
+api.S.players[0].gold = 500;
 api.S.units = api.S.units.filter((u) => u.owner === 0);
 for (let i = 0; i < 15 && !api.S.players[0].techs.includes("agriculture"); i++) {
   api.S.over = null;
@@ -274,7 +275,7 @@ if (pair) {
   if (traded[0]) {
     const yy = api.cityYields(traded[0]);
     check("sea trade bonus applied", yy.trade === true && yy.tradeGold >= 2 &&
-      yy.gold === 2 + Math.floor(traded[0].pop / 2) + yy.tradeGold);
+      yy.gold === 3 + Math.floor(traded[0].pop / 2) + yy.tradeGold);
     traded[0].buildings.push("market");
     const ym = api.cityYields(traded[0]);
     check("market doubles sea trade", ym.tradeGold === yy.tradeGold * 2 && ym.gold === yy.gold + yy.tradeGold &&
@@ -1217,10 +1218,10 @@ check("upkeep counts units without cities", gp0.income === 0 && gp0.upkeep === 2
 api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
 const goldCity = api.S.cities.find((c) => c.owner === 0);
 const gt = api.playerGoldPerTurn(0);
-check("city tax and upkeep converge", api.cityYields(goldCity).gold === 2 &&
-  gt.income === 2 && gt.upkeep === 3 && gt.net === -1);
+check("city tax and upkeep converge", api.cityYields(goldCity).gold === 3 &&
+  gt.income === 3 && gt.upkeep === 3 && gt.net === 0);
 api.endTurn();
-check("gold accrues net per turn", api.S.players[0].gold === 49);
+check("gold accrues net per turn", api.S.players[0].gold === 50);
 
 api.newGame(1);
 api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
@@ -1234,7 +1235,7 @@ check("empty treasury stops science", api.S.players[0].gold === 0 && api.S.playe
   api.S.log.some((l) => l.includes("Казна пуста")));
 api.S.players[0].gold = 20;
 api.endTurn();
-check("science resumes with funded treasury", api.S.players[0].gold === 9 && api.S.players[0].progress > 0);
+check("science resumes with funded treasury", api.S.players[0].gold === 10 && api.S.players[0].progress > 0);
 
 api.newGame(1);
 api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
