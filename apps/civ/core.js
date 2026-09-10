@@ -10,18 +10,19 @@ const TERRAIN = {
 };
 
 const UNITS = {
-  settler: { name: "Поселенец", letter: "П", icon: "🛖", atk: 0, def: 1, moves: 1, cost: 30, tech: null },
-  scout: { name: "Разведчик", letter: "Р", icon: "🧭", atk: 1, def: 1, moves: 2, cost: 15, tech: null },
-  warrior: { name: "Воин", letter: "В", icon: "⚔️", atk: 2, def: 2, moves: 1, cost: 20, tech: null },
-  archer: { name: "Лучник", letter: "Л", icon: "🏹", atk: 3, def: 4, moves: 1, cost: 35, tech: "archery" },
-  swordsman: { name: "Мечник", letter: "М", icon: "🗡️", atk: 5, def: 4, moves: 1, cost: 45, tech: "iron", res: ["iron"] },
-  galley: { name: "Галера", letter: "Г", icon: "⛵", atk: 3, def: 2, moves: 3, cost: 35, tech: "sailing", naval: true, capacity: 2 },
-  caravel: { name: "Каравелла", letter: "К", icon: "🚢", atk: 5, def: 3, moves: 4, cost: 55, tech: "astronomy", naval: true, capacity: 3 },
-  spearman: { name: "Копейщик", letter: "Ц", icon: "🔱", atk: 3, def: 5, moves: 1, cost: 40, tech: "bronze" },
-  horseman: { name: "Всадник", letter: "Вс", icon: "🐎", atk: 5, def: 3, moves: 2, cost: 55, tech: "horsebackriding", res: ["horses"] },
-  catapult: { name: "Катапульта", letter: "Т", icon: "💥", atk: 10, def: 2, moves: 1, cost: 70, tech: "machinery" },
-  knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism", res: ["iron", "horses"] },
-  musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder" },
+  settler: { name: "Поселенец", letter: "П", icon: "🛖", atk: 0, def: 1, moves: 1, cost: 30, tech: null, upgrade: null },
+  scout: { name: "Разведчик", letter: "Р", icon: "🧭", atk: 1, def: 1, moves: 2, cost: 15, tech: null, upgrade: null },
+  warrior: { name: "Воин", letter: "В", icon: "⚔️", atk: 2, def: 2, moves: 1, cost: 20, tech: null, upgrade: "swordsman" },
+  archer: { name: "Лучник", letter: "Л", icon: "🏹", atk: 3, def: 4, moves: 1, cost: 35, tech: "archery", upgrade: "crossbowman" },
+  swordsman: { name: "Мечник", letter: "М", icon: "🗡️", atk: 5, def: 4, moves: 1, cost: 45, tech: "iron", res: ["iron"], upgrade: "musketman" },
+  galley: { name: "Галера", letter: "Г", icon: "⛵", atk: 3, def: 2, moves: 3, cost: 35, tech: "sailing", naval: true, capacity: 2, upgrade: "caravel" },
+  caravel: { name: "Каравелла", letter: "К", icon: "🚢", atk: 5, def: 3, moves: 4, cost: 55, tech: "astronomy", naval: true, capacity: 3, upgrade: null },
+  spearman: { name: "Копейщик", letter: "Ц", icon: "🔱", atk: 3, def: 5, moves: 1, cost: 40, tech: "bronze", upgrade: "musketman" },
+  horseman: { name: "Всадник", letter: "Вс", icon: "🐎", atk: 5, def: 3, moves: 2, cost: 55, tech: "horsebackriding", res: ["horses"], upgrade: "knight" },
+  catapult: { name: "Катапульта", letter: "Т", icon: "💥", atk: 10, def: 2, moves: 1, cost: 70, tech: "machinery", upgrade: null },
+  crossbowman: { name: "Арбалетчик", letter: "Ар", icon: "🎯", atk: 6, def: 5, moves: 1, cost: 55, tech: "machinery", upgrade: null },
+  knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism", res: ["iron", "horses"], upgrade: null },
+  musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder", upgrade: null },
 };
 
 const DIFFICULTIES = [
@@ -477,6 +478,37 @@ function spawn(type, owner, x, y) {
   const u = { id: S.nextId++, type, owner, x, y, moves: UNITS[type].moves };
   S.units.push(u);
   return u;
+}
+
+function upgradeCost(u) {
+  const to = UNITS[u.type] ? UNITS[u.type].upgrade : null;
+  if (!to) return 0;
+  return Math.max(10, 2 * (UNITS[to].cost - UNITS[u.type].cost));
+}
+
+function upgradeUnit(u) {
+  const from = u && UNITS[u.type];
+  if (!from) return { ok: false, reason: "юнит не найден" };
+  const to = from.upgrade;
+  if (!to) return { ok: false, reason: "улучшение недоступно" };
+  const c = cityAt(u.x, u.y);
+  const ownTerritory = (c && c.owner === u.owner) || (S.tileOwner && S.tileOwner[key(u.x, u.y)] === u.owner);
+  if (!ownTerritory) return { ok: false, reason: "апгрейд доступен только на своей территории" };
+  const def = UNITS[to];
+  const p = S.players[u.owner];
+  if (!unitAvailable(u.owner, to)) {
+    if (def.tech && !p.techs.includes(def.tech))
+      return { ok: false, reason: `нужна технология: ${TECHS[def.tech].name}` };
+    const miss = (def.res || []).filter((r) => !resourceConnected(u.owner, r));
+    return { ok: false, reason: `нужен ресурс в границах: ${miss.map((r) => RESOURCES[r].name).join(", ")}` };
+  }
+  const price = upgradeCost(u);
+  if (p.gold < price) return { ok: false, reason: "недостаточно золота" };
+  p.gold -= price;
+  u.type = to;
+  u.moves = 0;
+  addLog(`${from.name} повышен до ${def.name} (−${price}🪙)`);
+  return { ok: true };
 }
 
 function computeVision() {
@@ -1022,6 +1054,16 @@ function aiTurn() {
 function aiTurnOne(owner) {
   const p = S.players[owner];
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  if (!S.players.some((_, i) => i !== owner && atWar(owner, i))) {
+    const upCand = S.units
+      .filter((u) => u.owner === owner && UNITS[u.type].upgrade)
+      .sort((a, b) => UNITS[UNITS[b.type].upgrade].atk - UNITS[UNITS[a.type].upgrade].atk);
+    for (const u of upCand) {
+      const price = upgradeCost(u);
+      if (p.gold <= price + 50) continue;
+      if (upgradeUnit(u).ok) break;
+    }
+  }
   for (const c of S.cities.filter((x) => x.owner === owner)) {
     if (!c.producing) {
       const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
@@ -1371,7 +1413,7 @@ export {
   TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, RESOURCES, W, H, TS, SAVE_KEY,
   CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
-  newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
+  newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
@@ -1409,6 +1451,8 @@ export function debugApi() {
     attack,
     moveUnit,
     spawn,
+    upgradeCost,
+    upgradeUnit,
     drownCheck,
     nextInStack,
     save,

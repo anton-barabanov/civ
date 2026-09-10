@@ -1404,6 +1404,171 @@ check("load does not double-backfill", api.load() === true &&
   api.S.res.filter((r) => r === "iron").length === ironKept &&
   api.S.res.filter((r) => r === "horses").length === horsesKept);
 
+api.newGame(1);
+check("crossbowman locked without machinery", api.unitAvailable(0, "crossbowman") === false);
+const upCoast = (() => {
+  for (let i = 0; i < api.S.map.length; i++) {
+    const x = i % 26, y = (i / 26) | 0;
+    if (api.S.map[i] === 0 || api.S.map[i] === 5) continue;
+    if (api.S.cities.some((c) => c.x === x && c.y === y)) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
+      if (api.S.map[ny * 26 + nx] === 0) return [x, y];
+    }
+  }
+  return null;
+})();
+if (!upCoast) {
+  check("upgrade test city founded on coast", false);
+} else {
+  api.foundCity(api.spawn("settler", 0, upCoast[0], upCoast[1]));
+  const upCity = api.S.cities[0];
+  for (let i = 0; i < api.S.res.length; i++)
+    if (api.S.res[i] === "iron" || api.S.res[i] === "horses" || api.S.res[i] === "marble") api.S.res[i] = null;
+  api.S.players[0].techs.push("archery", "bronze", "iron", "machinery", "gunpowder", "feudalism", "sailing", "astronomy");
+  const upOwn = [];
+  for (let i = 0; i < api.S.tileOwner.length; i++) if (api.S.tileOwner[i] === 0) upOwn.push(i);
+  api.S.res[upOwn[0]] = "iron";
+  api.S.res[upOwn[1]] = "horses";
+
+  check("crossbowman unit data", UT.crossbowman.name === "Арбалетчик" && UT.crossbowman.letter === "Ар" &&
+    UT.crossbowman.icon === "🎯" && UT.crossbowman.atk === 6 && UT.crossbowman.def === 5 &&
+    UT.crossbowman.moves === 1 && UT.crossbowman.cost === 55 && UT.crossbowman.tech === "machinery");
+  check("crossbowman buildable with machinery", api.unitAvailable(0, "crossbowman") === true);
+  upCity.producing = { k: "unit", id: "crossbowman" };
+  upCity.prodStored = 999;
+  api.processEconomy();
+  check("crossbowman produced in city", api.S.units.some((u) => u.owner === 0 && u.type === "crossbowman"));
+  upCity.producing = null;
+
+  check("upgrade chains declared", UT.warrior.upgrade === "swordsman" && UT.swordsman.upgrade === "musketman" &&
+    UT.archer.upgrade === "crossbowman" && UT.spearman.upgrade === "musketman" &&
+    UT.horseman.upgrade === "knight" && UT.galley.upgrade === "caravel" &&
+    UT.settler.upgrade === null && UT.scout.upgrade === null && UT.catapult.upgrade === null &&
+    UT.crossbowman.upgrade === null && UT.knight.upgrade === null && UT.musketman.upgrade === null &&
+    UT.caravel.upgrade === null);
+  let upCyc = false;
+  for (const id in UT) {
+    let cur = id, steps = 0;
+    while (UT[cur].upgrade) {
+      cur = UT[cur].upgrade;
+      if (cur === id || ++steps > Object.keys(UT).length) { upCyc = true; break; }
+    }
+    if (upCyc) break;
+  }
+  check("upgrade chains acyclic and strictly priced", !upCyc &&
+    Object.entries(UT).every(([, d]) => !d.upgrade || !!UT[d.upgrade] && UT[d.upgrade].cost > d.cost));
+  check("upgradeCost formula max(10, 2x diff)", api.upgradeCost({ type: "warrior" }) === 50 &&
+    api.upgradeCost({ type: "swordsman" }) === 110 && api.upgradeCost({ type: "archer" }) === 40 &&
+    api.upgradeCost({ type: "spearman" }) === 120 && api.upgradeCost({ type: "horseman" }) === 60 &&
+    api.upgradeCost({ type: "galley" }) === 40 && api.upgradeCost({ type: "musketman" }) === 0);
+  check("debugApi exposes upgrade functions", typeof api.upgradeUnit === "function" && typeof api.upgradeCost === "function");
+
+  const upW = api.spawn("warrior", 0, upCity.x, upCity.y);
+  upW.atkBonus = 1;
+  upW.moves = 1;
+  const upWId = upW.id, upWX = upW.x, upWY = upW.y;
+  api.S.players[0].gold = 100;
+  const upr1 = api.upgradeUnit(upW);
+  check("warrior upgraded to swordsman", upr1.ok === true && upW.type === "swordsman" && api.S.players[0].gold === 50);
+  check("upgrade preserves id position atkBonus and spends turn",
+    upW.id === upWId && upW.x === upWX && upW.y === upWY && upW.atkBonus === 1 && upW.moves === 0);
+  check("upgrade logged", api.S.log.some((l) => l.includes("повышен до") && l.includes("−50")));
+  api.S.players[0].gold = 200;
+  check("swordsman upgraded to musketman", api.upgradeUnit(upW).ok === true && upW.type === "musketman" &&
+    api.S.players[0].gold === 90 && upW.atkBonus === 1);
+  const upA = api.spawn("archer", 0, upCity.x, upCity.y);
+  api.S.players[0].gold = 100;
+  check("archer upgraded to crossbowman", api.upgradeUnit(upA).ok === true && upA.type === "crossbowman" &&
+    api.S.players[0].gold === 60);
+  const upS = api.spawn("spearman", 0, upCity.x, upCity.y);
+  api.S.players[0].gold = 200;
+  check("spearman upgraded to musketman", api.upgradeUnit(upS).ok === true && upS.type === "musketman" &&
+    api.S.players[0].gold === 80);
+
+  const upH = api.spawn("horseman", 0, upCity.x, upCity.y);
+  api.S.players[0].gold = 300;
+  api.S.res[upOwn[0]] = null;
+  const uprH1 = api.upgradeUnit(upH);
+  check("horseman upgrade refused without iron", uprH1.ok === false && uprH1.reason.includes("ресурс") &&
+    upH.type === "horseman" && api.S.players[0].gold === 300);
+  api.S.res[upOwn[0]] = "iron";
+  api.S.res[upOwn[1]] = null;
+  const uprH2 = api.upgradeUnit(upH);
+  check("horseman upgrade refused without horses", uprH2.ok === false && uprH2.reason.includes("ресурс") && upH.type === "horseman");
+  api.S.res[upOwn[1]] = "horses";
+  check("horseman upgraded to knight with resources", api.upgradeUnit(upH).ok === true && upH.type === "knight" &&
+    api.S.players[0].gold === 240);
+
+  let ownedSea = -1, freeSea = -1;
+  for (let i = 0; i < api.S.map.length; i++) {
+    if (api.S.map[i] !== 0) continue;
+    if (api.S.tileOwner[i] === 0 && ownedSea === -1) ownedSea = i;
+    if (api.S.tileOwner[i] === -1 && freeSea === -1) freeSea = i;
+  }
+  const upG = api.spawn("galley", 0, ownedSea % 26, (ownedSea / 26) | 0);
+  api.S.players[0].gold = 100;
+  check("galley upgraded on owned water", api.upgradeUnit(upG).ok === true && upG.type === "caravel" &&
+    api.S.players[0].gold === 60);
+  const upG2 = api.spawn("galley", 0, freeSea % 26, (freeSea / 26) | 0);
+  const uprG2 = api.upgradeUnit(upG2);
+  check("galley upgrade refused on neutral water", uprG2.ok === false && uprG2.reason.includes("территор") &&
+    upG2.type === "galley" && api.S.players[0].gold === 60);
+
+  let freeLand = -1;
+  for (let i = 0; i < api.S.map.length; i++)
+    if (api.S.map[i] !== 0 && api.S.map[i] !== 5 && api.S.tileOwner[i] === -1) { freeLand = i; break; }
+  const upOff = api.spawn("warrior", 0, freeLand % 26, (freeLand / 26) | 0);
+  api.S.players[0].gold = 999;
+  const uprOff = api.upgradeUnit(upOff);
+  check("upgrade refused off own territory", uprOff.ok === false && uprOff.reason.includes("территор") &&
+    upOff.type === "warrior" && api.S.players[0].gold === 999);
+
+  api.S.players[0].techs = api.S.players[0].techs.filter((t) => t !== "gunpowder");
+  const upNoTech = api.spawn("spearman", 0, upCity.x, upCity.y);
+  const uprNT = api.upgradeUnit(upNoTech);
+  check("upgrade refused without target tech", uprNT.ok === false && uprNT.reason.includes("технолог") &&
+    upNoTech.type === "spearman" && api.S.players[0].gold === 999);
+  api.S.players[0].techs.push("gunpowder");
+
+  const upPoor = api.spawn("warrior", 0, upCity.x, upCity.y);
+  api.S.players[0].gold = 49;
+  const uprP = api.upgradeUnit(upPoor);
+  check("upgrade refused when short of gold", uprP.ok === false && uprP.reason.includes("золота") &&
+    upPoor.type === "warrior" && api.S.players[0].gold === 49);
+  const upDone = api.spawn("musketman", 0, upCity.x, upCity.y);
+  check("upgrade refused without upgrade path", api.upgradeUnit(upDone).ok === false && upDone.type === "musketman");
+}
+
+api.newGame(1);
+const ugSet = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+api.foundCity(ugSet);
+const ugCity = api.S.cities[0];
+for (let i = 0; i < api.S.res.length; i++)
+  if (api.S.res[i] === "iron" || api.S.res[i] === "horses" || api.S.res[i] === "marble") api.S.res[i] = null;
+api.S.players[1].techs.push("iron");
+const ugOwn = [];
+for (let i = 0; i < api.S.tileOwner.length; i++) if (api.S.tileOwner[i] === 1) ugOwn.push(i);
+api.S.res[ugOwn[0]] = "iron";
+api.spawn("warrior", 1, ugCity.x, ugCity.y);
+api.spawn("warrior", 1, ugCity.x, ugCity.y);
+const ugRnd = Math.random;
+api.declareWar(0, 1);
+api.S.players[1].gold = 120;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = ugRnd; }
+check("AI does not upgrade at war", api.S.units.filter((u) => u.owner === 1 && u.type === "swordsman").length === 0 &&
+  api.S.players[1].gold === 120);
+api.makePeace(0, 1);
+api.S.players[1].gold = 300;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = ugRnd; }
+check("AI upgrades one unit per turn at peace",
+  api.S.units.filter((u) => u.owner === 1 && u.type === "swordsman").length === 1 &&
+  api.S.units.filter((u) => u.owner === 1 && u.type === "warrior").length === 2 &&
+  api.S.players[1].gold === 250);
+
 if (!mutation) {
   const expectFail = {
     a: "FAIL granary +2 food",

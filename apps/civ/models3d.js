@@ -183,6 +183,11 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     addFigure(group, om, 0.085, 0.36, 0, 0);
     add(group, geo("u:bow", () => new THREE.TorusGeometry(0.16, 0.016, 6, 12, Math.PI)), woodDark, 0.12, 0.36, 0).rotation.y = Math.PI / 2;
     add(group, geo("u:quiver", () => new THREE.BoxGeometry(0.05, 0.17, 0.05)), wood, -0.1, 0.3, -0.07).rotation.z = 0.35;
+  } else if (unitType === "crossbowman") {
+    addFigure(group, om, 0.09, 0.37, 0, 0);
+    add(group, geo("u:xbowStock", () => new THREE.BoxGeometry(0.48, 0.032, 0.036)), wood, 0.04, 0.42, 0.05).rotation.z = 0.28;
+    add(group, geo("u:xbowArc", () => new THREE.TorusGeometry(0.13, 0.015, 6, 12, Math.PI)), woodDark, -0.14, 0.42, 0.05);
+    add(group, geo("u:xbowTrigger", () => new THREE.BoxGeometry(0.028, 0.055, 0.02)), metal, 0.1, 0.36, 0.05);
   } else if (unitType === "swordsman") {
     addFigure(group, om, 0.13, 0.4, 0, 0);
     add(group, geo("u:helm", () => new THREE.SphereGeometry(0.105, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2)), metal, 0, 0.46, 0);

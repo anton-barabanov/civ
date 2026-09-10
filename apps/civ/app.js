@@ -2,7 +2,7 @@ import {
   TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, W, H,
   key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack,
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
-  playerGoldPerTurn, buyForGold,
+  playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf,
   RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
@@ -212,6 +212,20 @@ function renderPanel() {
     if (ownCity && ownCity.owner === 0) {
       body += `<button class="btn text" id="civ-city">🏛 Открыть город</button>`;
     }
+    const upTo = u.upgrade ? UNITS[u.upgrade] : null;
+    if (upTo) {
+      const price = upgradeCost(sel);
+      const onOwn = (ownCity && ownCity.owner === 0) ||
+        (S.tileOwner && S.tileOwner[key(sel.x, sel.y)] === 0);
+      let upTitle = "";
+      if (!onOwn) upTitle = "Апгрейд доступен только на своей территории";
+      else if (!unitAvailable(0, u.upgrade))
+        upTitle = upTo.tech && !S.players[0].techs.includes(upTo.tech)
+          ? `Не изучена технология: ${TECHS[upTo.tech].name}`
+          : `Нужен ресурс в границах: ${(upTo.res || []).map((r) => RESOURCES[r].name).join(", ")}`;
+      else if (S.players[0].gold < price) upTitle = `Мало золота: нужно ${price}🪙`;
+      body += `<button class="btn text" id="civ-up" ${upTitle ? `disabled title="${upTitle}"` : ""}>⬆ Улучшить до ${upTo.name} за ${price}🪙</button>`;
+    }
     if (sel.moves > 0) {
       body += `<button class="btn text" id="civ-skip">Пропустить ход</button>`;
     }
@@ -238,6 +252,11 @@ function renderPanel() {
     const u = unitById(getState().sel);
     const c = u && cityAt(u.x, u.y);
     if (c) showCity(c);
+  };
+  const ub = document.getElementById("civ-up");
+  if (ub) ub.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u && upgradeUnit(u).ok) { save(); refresh(); }
   };
 }
 
