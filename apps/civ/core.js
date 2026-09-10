@@ -1136,6 +1136,25 @@ function aiTurn() {
 function aiTurnOne(owner) {
   const p = S.players[owner];
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  const myUnits = S.units.filter((u) => u.owner === owner);
+  const myCities = S.cities.filter((c) => c.owner === owner);
+  const military = () => myUnits.filter((u) => !UNITS[u.type].gp && UNITS[u.type].atk > 0)
+    .sort((a, b) => UNITS[a.type].atk - UNITS[b.type].atk);
+  if (myCities.length) {
+    const cap = myCities.length * 3 + 2;
+    if (myUnits.length > cap) {
+      const weakest = military()[0];
+      if (weakest) S.units = S.units.filter((u) => u !== weakest);
+    }
+    const gp = playerGoldPerTurn(owner);
+    if (gp.net < 0 && p.gold < 20) {
+      const weakest = military()[0];
+      if (weakest) {
+        S.units = S.units.filter((u) => u !== weakest);
+        addLog(`${p.name} распускают часть войск — казна пуста`);
+      }
+    }
+  }
   if (!S.players.some((_, i) => i !== owner && atWar(owner, i))) {
     const upCand = S.units
       .filter((u) => u.owner === owner && UNITS[u.type].upgrade)

@@ -33,13 +33,15 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = ["a", "b", "c", "d"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d", "e", "f"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
 const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
   b: ["  recomputeBorders();\n  for (const u of S.units) u.moves = UNITS[u.type].moves;", "  for (const u of S.units) u.moves = UNITS[u.type].moves;"],
   c: ['"+2 производства во всех городах", effects: { prodFlat: 2 }', '"+2 производства во всех городах", effects: { prodFlat: 0 }'],
   d: ["  aiDiplomacy();\n  aiTurn();", "  aiTurn();"],
+  e: ["3 + Math.floor(c.pop / 2) + tradeGold", "0 + Math.floor(c.pop / 2) + tradeGold"],
+  f: ['  if (S.turn - (r.lastTradeTurn ?? -99) < TRADE_COOLDOWN) return no("обмен был недавно");\n', ""],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -1871,14 +1873,253 @@ const gft1 = api.grantFreeTech(api.S.players[0]);
 check("grantFreeTech resets matching research", gft1 === "archery" &&
   api.S.players[0].researching === null && api.S.players[0].progress === 0);
 
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const bgCity = api.S.cities[0];
+for (let i = 0; i < api.S.res.length; i++)
+  if (api.S.res[i] === "iron" || api.S.res[i] === "horses" || api.S.res[i] === "marble") api.S.res[i] = null;
+api.S.players[0].techs.push("bronze", "iron");
+api.S.players[0].gold = 1000;
+const bgBad = api.buyForGold(bgCity.id, "unit", "swordsman");
+check("buyForGold refuses resource-locked unit", bgBad.ok === false && bgBad.reason.includes("ресурс") &&
+  api.S.players[0].gold === 1000 && !api.S.units.some((u) => u.type === "swordsman"));
+const bgOwn = [];
+for (let i = 0; i < api.S.tileOwner.length; i++)
+  if (api.S.tileOwner[i] === 0 && i !== bgCity.y * 26 + bgCity.x) bgOwn.push(i);
+api.S.res[bgOwn[0]] = "iron";
+const bgOk = api.buyForGold(bgCity.id, "unit", "swordsman");
+check("buyForGold buys unit once resource connected", bgOk.ok === true &&
+  api.S.players[0].gold === 1000 - Math.ceil(UT.swordsman.cost * 3) &&
+  api.S.units.some((u) => u.owner === 0 && u.type === "swordsman" && u.x === bgCity.x && u.y === bgCity.y));
+
+api.newGame(1);
+const shipSpots = [];
+for (let j = 0; j < api.S.map.length && shipSpots.length < 3; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
+  if (api.S.units.some((u) => Math.abs(u.x - x) <= 2 && Math.abs(u.y - y) <= 2)) continue;
+  if (api.S.cities.some((c) => Math.abs(c.x - x) <= 2 && Math.abs(c.y - y) <= 2)) continue;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18 || api.S.map[ny * 26 + nx] !== 0) continue;
+    if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([wx, wy]) => {
+      const jx = nx + wx, jy = ny + wy;
+      return jx >= 0 && jy >= 0 && jx < 26 && jy < 18 && api.S.map[jy * 26 + jx] === 0;
+    })) continue;
+    shipSpots.push({ x, y, sx: nx, sy: ny });
+    break;
+  }
+}
+const shipSpot = shipSpots[0];
+if (!shipSpot) {
+  check("upgrade aboard own ship keeps position", false);
+  check("upgraded unit remains passenger of moving ship", false);
+} else {
+  api.foundCity(api.spawn("settler", 0, shipSpot.x, shipSpot.y));
+  const shipCity = api.S.cities[0];
+  for (let i = 0; i < api.S.res.length; i++)
+    if (api.S.res[i] === "iron" || api.S.res[i] === "horses" || api.S.res[i] === "marble") api.S.res[i] = null;
+  api.S.players[0].techs.push("bronze", "iron", "machinery", "gunpowder", "feudalism", "sailing");
+  const shOwn = [];
+  for (let i = 0; i < api.S.tileOwner.length; i++)
+    if (api.S.tileOwner[i] === 0 && i !== shipCity.y * 26 + shipCity.x) shOwn.push(i);
+  api.S.res[shOwn[0]] = "iron";
+  const shipTileOwner = api.getTileOwner()[shipSpot.sy * 26 + shipSpot.sx];
+  const shipGalley = api.spawn("galley", 0, shipSpot.sx, shipSpot.sy);
+  const shipWar = api.spawn("warrior", 0, shipSpot.x, shipSpot.y);
+  api.moveUnit(shipWar, shipSpot.sx, shipSpot.sy);
+  api.S.players[0].gold = 200;
+  const shipUp = api.upgradeUnit(shipWar);
+  check("upgrade aboard own ship keeps position", shipTileOwner === 0 && shipUp.ok === true &&
+    shipWar.type === "swordsman" && shipWar.x === shipSpot.sx && shipWar.y === shipSpot.sy &&
+    api.S.players[0].gold === 150);
+  const shipNext = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+    .map(([dx, dy]) => [shipSpot.sx + dx, shipSpot.sy + dy])
+    .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0)[0];
+  shipGalley.moves = 3;
+  api.moveUnit(shipGalley, shipNext[0], shipNext[1]);
+  check("upgraded unit remains passenger of moving ship", shipWar.x === shipNext[0] && shipWar.y === shipNext[1] &&
+    api.S.units.includes(shipGalley));
+}
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner === 0);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const profCity = api.S.cities[0];
+const profArt = api.spawn("gp_artist", 0, profCity.x, profCity.y);
+const profProph = api.spawn("gp_prophet", 0, profCity.x, profCity.y);
+const profR = api.useGreatPerson(profProph.id);
+check("prophet founds religion in city with GP present", profR.ok === true &&
+  api.S.religions.some((r) => r.id === "oracle" && r.owner === 0 && r.holyCityId === profCity.id) &&
+  profCity.religion === "oracle" && api.S.units.includes(profArt) && !api.S.units.includes(profProph));
+
+api.newGame(1, 2);
+const pre3Map = api.S.map.slice();
+const pre3Res = api.S.res.map((r) => (r === "iron" || r === "horses" || r === "marble") ? null : r);
+const pre3Sea = pre3Res.filter((r) => r === "fish" || r === "whale").length;
+let p3a = null, p3b = null;
+for (let j = 0; j < pre3Map.length && !p3b; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (pre3Map[j] === 0 || pre3Map[j] === 5) continue;
+  if (!p3a) p3a = [x, y];
+  else if (x !== p3a[0] || y !== p3a[1]) p3b = [x, y];
+}
+store["civ1_save"] = JSON.stringify({
+  turn: 20, nextId: 300, difficulty: 1,
+  map: pre3Map, res: pre3Res,
+  players: [
+    { name: "Рим", color: "#4a90d9", techs: ["agriculture"], researching: "pottery", progress: 3, isHuman: true },
+    { name: "Галлы", color: "#d9534f", techs: ["mysticism"], researching: null, progress: 0, isHuman: false },
+    { name: "Египет", color: "#f0c040", techs: [], researching: null, progress: 0, isHuman: false },
+  ],
+  relations: {
+    "0:1": { war: false, since: -1 },
+    "0:2": { war: false, since: -1 },
+    "1:2": { war: false, since: -1 },
+  },
+  units: [
+    { id: 301, type: "warrior", owner: 0, x: p3a[0], y: p3a[1], moves: 1 },
+    { id: 302, type: "settler", owner: 0, x: p3a[0], y: p3a[1], moves: 1 },
+    { id: 303, type: "warrior", owner: 1, x: p3b[0], y: p3b[1], moves: 1 },
+  ],
+  cities: [
+    { id: 310, owner: 1, x: p3b[0], y: p3b[1], name: "Герговия", pop: 3, foodStored: 0, prodStored: 0, producing: null, buildings: ["granary"], culture: 10 },
+  ],
+  wonders: [],
+  explored: new Array(26 * 18).fill(1),
+  log: ["старый сейв"],
+  over: null,
+  sel: null,
+});
+check("pre-S3 save loads", api.load() === true);
+check("pre-S3 migration backfills gold gp trade and resources",
+  api.S.players.every((p) => p.gold === 50 && p.gpPoints === 0 && p.gpNext === 30 && p.gpRotate === 0) &&
+    Object.values(api.S.relations).every((r) => r.lastTradeTurn === -99) &&
+    api.S.res.some((r) => r === "iron") && api.S.res.some((r) => r === "horses") && api.S.res.some((r) => r === "marble") &&
+    api.S.res.filter((r) => r === "fish" || r === "whale").length === pre3Sea);
+let p3Err = null;
+try { for (let i = 0; i < 5; i++) { api.S.over = null; api.endTurn(); } } catch (e) { p3Err = e; }
+check("pre-S3 save lives 5 turns with backfilled economy", p3Err === null && api.S.turn === 25 &&
+  api.S.players.every((p) => p.gold >= 0));
+
+if (!fast) {
+  api.newGame(1, 2);
+  api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+  const ecoAlive = (i) => api.S.cities.some((c) => c.owner === i) || api.S.units.some((u) => u.owner === i && u.type === "settler");
+  const ecoRefound = () => {
+    const to = api.getTileOwner();
+    for (let j = 0; j < api.S.map.length; j++) {
+      const x = j % 26, y = (j / 26) | 0;
+      if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) {
+        api.foundCity(api.spawn("settler", 0, x, y));
+        return;
+      }
+    }
+  };
+  const ecoStruck = api.S.players.map(() => 0);
+  let ecoErr = null, goldBad = false, gpBad = false, wonderBad = false, tradeBad = false, gpProdBad = false, chainBad = false, strikeLogBad = false;
+  let ecoPrev = null;
+  try {
+    for (let t = 0; t < 60; t++) {
+      api.S.over = null;
+      if (!ecoAlive(0)) ecoRefound();
+      api.endTurn();
+      if ((t + 1) % 10 !== 0) continue;
+      const marks = api.S.players.map((p, i) => ({ gold: p.gold, net: api.playerGoldPerTurn(i).net, gp: p.gpPoints ?? 0, next: p.gpNext ?? 30 }));
+      if (marks.some((m) => m.gold < 0)) goldBad = true;
+      marks.forEach((m, i) => {
+        if (m.gp < 0) gpBad = true;
+        if (m.gold === 0 && m.net < 0 && ecoAlive(i)) {
+          ecoStruck[i]++;
+          if (i === 0 && !api.S.log.some((l) => l.includes("Казна пуста"))) strikeLogBad = true;
+        }
+      });
+      if (ecoPrev) marks.forEach((m, i) => { if (m.gp < ecoPrev[i].gp && m.next <= ecoPrev[i].next) gpBad = true; });
+      ecoPrev = marks;
+      const wIds = api.S.wonders.map((w) => w.id);
+      if (new Set(wIds).size !== wIds.length || api.S.wonders.some((w) => !api.WONDERS[w.id] || w.turn > api.S.turn)) wonderBad = true;
+      if (Object.values(api.S.relations).some((r) => r.lastTradeTurn > api.S.turn)) tradeBad = true;
+      if (api.S.cities.some((c) => c.producing && c.producing.k === "unit" && UT[c.producing.id] && UT[c.producing.id].gp)) gpProdBad = true;
+      if (api.S.units.some((u) => !UT[u.type])) chainBad = true;
+      for (const ty of new Set(api.S.units.map((u) => u.type))) {
+        const seen = new Set([ty]);
+        let cur = UT[ty].upgrade;
+        while (cur) {
+          if (!UT[cur] || seen.has(cur)) { chainBad = true; break; }
+          seen.add(cur);
+          cur = UT[cur].upgrade;
+        }
+      }
+    }
+  } catch (e) { ecoErr = e; }
+  check("econ cycle: 60 turns with 2 AI run clean", ecoErr === null && api.S.turn === 61);
+  check("econ cycle: gold of every player stays non-negative", !goldBad);
+  check("econ cycle: zero treasury triggers strike, nobody struck at every mark", !strikeLogBad && ecoStruck.every((n) => n < 6));
+  check("econ cycle: gpPoints never drop without great person birth", !gpBad);
+  check("econ cycle: wonders stay unique and valid", !wonderBad);
+  check("econ cycle: lastTradeTurn never exceeds current turn", !tradeBad);
+  check("econ cycle: great people never enter city production", !gpProdBad);
+  check("econ cycle: fielded units have valid acyclic upgrade chains", !chainBad);
+}
+
+if (!fast) {
+  for (const eDiff of [0, 2]) {
+    const tag = `stress 80 diff ${eDiff} opp 2`;
+    api.newGame(eDiff, 2);
+    api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+    let eErr = null, eIncomeBad = false, eP0StrikeBad = false, eAiSciBad = false, eGoldNeg = false;
+    let p0StrikeRun = 0, cityTurns = 0;
+    try {
+      for (let t = 0; t < 80; t++) {
+        api.S.over = null;
+        const ep0 = api.S.players[0];
+        if (!ep0.researching) {
+          const avail = Object.keys(api.TECHS).filter((tt) => api.techAvailable(ep0, tt))
+            .sort((a, b) => api.TECHS[a].cost - api.TECHS[b].cost)[0];
+          if (avail) ep0.researching = avail;
+        }
+        if (!api.S.cities.some((c) => c.owner === 0) && !api.S.units.some((u) => u.owner === 0 && u.type === "settler")) {
+          const to = api.getTileOwner();
+          for (let j = 0; j < api.S.map.length; j++) {
+            const x = j % 26, y = (j / 26) | 0;
+            if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) {
+              api.foundCity(api.spawn("settler", 0, x, y));
+              break;
+            }
+          }
+        }
+        api.endTurn();
+        if (api.S.players.some((p) => p.gold < 0)) eGoldNeg = true;
+        if (api.S.cities.some((c) => c.owner === 0)) cityTurns++;
+        const g0 = api.playerGoldPerTurn(0);
+        if (api.S.cities.some((c) => c.owner === 0 && c.pop >= 2) && g0.income < 4) eIncomeBad = true;
+        if (api.S.players[0].gold === 0 && g0.net < 0) p0StrikeRun++;
+        else p0StrikeRun = 0;
+        if (p0StrikeRun > 20) eP0StrikeBad = true;
+      }
+    } catch (e) { eErr = e; }
+    if ([1, 2].some((i) => api.S.cities.filter((c) => c.owner === i).length >= 3 && api.S.players[i].techs.length < 5)) eAiSciBad = true;
+    check(`${tag}: no exceptions in 80 turns`, eErr === null);
+    check(`${tag}: 80 turns advanced`, api.S.turn >= 81);
+    check(`${tag}: treasuries never go negative`, !eGoldNeg);
+    check(`${tag}: player economy alive means income >= 4`, !eIncomeBad);
+    check(`${tag}: player never stuck in science strike`, !eP0StrikeBad);
+    const sciTotal = api.S.players[0].techs.reduce((s, t) => s + api.TECHS[t].cost, 0) + api.S.players[0].progress;
+    check(`${tag}: player science accumulates while cities stand`, cityTurns === 0 || sciTotal >= cityTurns * 1.75);
+    check(`${tag}: multi-city AI keeps researching`, !eAiSciBad);
+  }
+}
+
 if (!mutation) {
   const expectFail = {
     a: "FAIL granary +2 food",
     b: "FAIL processEconomy updates borders after growth",
     c: "FAIL pyramids +2 prod in all owner cities",
     d: "FAIL AI-AI peace concluded via endTurn",
+    e: "FAIL city tax and upkeep converge",
+    f: "FAIL trade blocked by cooldown",
   };
-  for (const m of ["a", "b", "c", "d"]) {
+  for (const m of ["a", "b", "c", "d", "e", "f"]) {
     const r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     check(`mutation ${m} caught by tests`, r.status !== 0 && r.status !== null && (r.stdout || "").includes(expectFail[m]));
   }
