@@ -346,6 +346,41 @@ function newGameButtons() {
     `<button class="btn ${i === 1 ? "primary" : "text"} civ-diff-btn" data-diff="${i}">${d.title}</button>`).join("");
 }
 
+function newGameControls(selectedDiff = 1, selectedOpps = 1, onDone) {
+  const holder = document.getElementById("civ-ng-controls");
+  if (!holder) return;
+  const oppBtns = [1, 2, 3, 4];
+  const sync = () => {
+    DIFFICULTIES.forEach((d, i) => {
+      const b = document.getElementById(`civ-ng-diff-${i}`);
+      if (b) b.className = `btn ${i === selectedDiff ? "primary" : "text"}`;
+    });
+    for (const n of oppBtns) {
+      const b = document.getElementById(`civ-ng-opp-${n}`);
+      if (b) b.className = `btn ${n === selectedOpps ? "primary" : "text"}`;
+    }
+  };
+  holder.innerHTML = `
+    <p>Сложность:</p>
+    <div class="civ-diff-btns">${DIFFICULTIES.map((d, i) =>
+      `<button class="btn ${i === selectedDiff ? "primary" : "text"}" id="civ-ng-diff-${i}">${d.title}</button>`).join("")}</div>
+    <p>Противники:</p>
+    <div class="civ-diff-btns">${oppBtns.map((n) =>
+      `<button class="btn ${n === selectedOpps ? "primary" : "text"}" id="civ-ng-opp-${n}">${n}</button>`).join("")}</div>
+    <button class="btn primary" id="civ-ng-go">Начать игру</button>
+  `;
+  DIFFICULTIES.forEach((d, i) => {
+    const b = document.getElementById(`civ-ng-diff-${i}`);
+    if (b) b.onclick = () => { selectedDiff = i; sync(); };
+  });
+  for (const n of oppBtns) {
+    const b = document.getElementById(`civ-ng-opp-${n}`);
+    if (b) b.onclick = () => { selectedOpps = n; sync(); };
+  }
+  const go = document.getElementById("civ-ng-go");
+  if (go) go.onclick = () => { newGame(selectedDiff, selectedOpps); if (onDone) onDone(); refresh(); };
+}
+
 function showStart(showContinue) {
   const m = document.createElement("div");
   m.className = "civ-modal";
@@ -353,21 +388,15 @@ function showStart(showContinue) {
   m.innerHTML = `
     <div class="civ-dialog">
       <h2>🏛 Цивилизация</h2>
-      <p>Пошаговая 4X-стратегия: расширяйтесь, изучайте технологии, захватите все города галлов.<br>Выберите сложность:</p>
+      <p>Пошаговая 4X-стратегия: расширяйтесь, изучайте технологии, захватите все города противников.</p>
       ${showContinue ? `<button class="btn primary" id="civ-continue">Продолжить игру</button>` : ""}
-      <div class="civ-diff-btns">${newGameButtons()}</div>
+      <div id="civ-ng-controls"></div>
     </div>
   `;
   rootEl.appendChild(m);
   const cont = document.getElementById("civ-continue");
   if (cont) cont.onclick = () => m.remove();
-  m.querySelectorAll(".civ-diff-btn").forEach((b) => {
-    b.onclick = () => {
-      newGame(Number(b.dataset.diff));
-      m.remove();
-      refresh();
-    };
-  });
+  newGameControls(1, 1, () => m.remove());
 }
 
 function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }

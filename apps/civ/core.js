@@ -68,9 +68,13 @@ const TECHS = {
   gunpowder: { name: "Порох", cost: 140, req: ["machinery", "education"] },
 };
 
-const CITY_NAMES = [
-  ["Рим", "Антиум", "Кумы", "Неаполь", "Равенна", "Арримин", "Арретий", "Медиолан"],
-  ["Герговия", "Аварик", "Бибракте", "Аlesia", "Нуманция", "Оппид", "Лутеция", "Викс"],
+const NATIONS = [
+  { name: "Рим", color: "#4a90d9", cityNames: ["Рим", "Антиум", "Кумы", "Неаполь", "Равенна", "Арримин", "Арретий", "Медиолан"] },
+  { name: "Галлы", color: "#d9534f", cityNames: ["Герговия", "Аварик", "Бибракте", "Аlesia", "Нуманция", "Оппид", "Лутеция", "Викс"] },
+  { name: "Египет", color: "#e8c34a", cityNames: ["Мемфис", "Фивы", "Гелиополь", "Элефантина", "Гиза", "Абидос", "Саис", "Танис"] },
+  { name: "Греция", color: "#3aa88a", cityNames: ["Афины", "Спарта", "Коринф", "Аргос", "Дельфы", "Милет", "Олинф", "Родос"] },
+  { name: "Карфаген", color: "#9a6bd9", cityNames: ["Карфаген", "Утика", "Гадрумет", "Гиппон", "Лептис", "Тапс", "Керкуан", "Мотия"] },
+  { name: "Персия", color: "#e07b39", cityNames: ["Персеполь", "Сузы", "Экбатана", "Вавилон", "Пасаргады", "Тиспа", "Дербент", "Артакса"] },
 ];
 
 const W = 26, H = 18, TS = 34;
@@ -293,32 +297,60 @@ function computeWaterComps(map) {
   return ids;
 }
 
-function findStarts() {
-  const comps = floodComponents(S.map, isLandTile).sort((a, b) => b.cells.length - a.cells.length);
-  const pickBest = (comp) => {
-    let best = null, bs = -1;
-    for (const i of comp.cells) {
-      const s = landScore(i % W, (i / W) | 0);
-      if (s > bs) { bs = s; best = i; }
-    }
-    return best;
-  };
-  const a = pickBest(comps[0]);
-  let b = comps[1] ? pickBest(comps[1]) : null;
-  if (b === null) {
-    const pool = [...comps[0].cells];
-    let bestD = -1;
-    for (let i = 0; i < pool.length; i++)
-      for (let j = i + 1; j < pool.length; j++) {
-        const d = dist(pool[i] % W, (pool[i] / W) | 0, pool[j] % W, (pool[j] / W) | 0);
-        if (d > bestD) { bestD = d; b = pool[j]; }
-      }
+function findStarts(k) {
+  const comps = floodComponents(S.map, isLandTile)
+    .map((c) => ({ size: c.cells.length, cells: c.cells.filter((i) => TERRAIN[S.map[i]].passable) }))
+    .filter((c) => c.cells.length > 0)
+    .sort((a, b) => b.size - a.size);
+  if (!comps.length) {
+    const fb = [[3, 3], [W - 4, H - 4], [3, H - 4], [W - 4, 3], [(W / 2) | 0, (H / 2) | 0]];
+    return Array.from({ length: k }, (_, i) => fb[i % fb.length].slice());
   }
-  if (a === null || b === null) return [[3, 3], [W - 4, H - 4]];
-  return [[a % W, (a / W) | 0], [b % W, (b / W) | 0]];
+  const xy = (i) => [i % W, (i / W) | 0];
+  const cdist = (i, j) => { const [a, b] = xy(i), [c, d] = xy(j); return dist(a, b, c, d); };
+  let result = null;
+  for (const minD of [6, 4, 2]) {
+    const sel = [];
+    for (const comp of comps) {
+      if (sel.length >= k) break;
+      let best = null, bs = -1, bestOk = null, bsOk = -1;
+      for (const i of comp.cells) {
+        const s = landScore(i % W, (i / W) | 0);
+        if (s > bs) { bs = s; best = i; }
+        if (sel.every((j) => cdist(i, j) >= minD) && s > bsOk) { bsOk = s; bestOk = i; }
+      }
+      sel.push(bestOk !== null ? bestOk : best);
+    }
+    if (sel.length < k) {
+      const pool = comps[0].cells;
+      while (sel.length < k) {
+        let cand = -1, cd = -1;
+        for (const i of pool) {
+          if (sel.includes(i)) continue;
+          let dmin = Infinity;
+          for (const j of sel) dmin = Math.min(dmin, cdist(i, j));
+          if (dmin > cd) { cd = dmin; cand = i; }
+        }
+        if (cand === -1 || cd < minD) break;
+        sel.push(cand);
+      }
+      for (const i of pool) {
+        if (sel.length >= k) break;
+        if (!sel.includes(i)) sel.push(i);
+      }
+    }
+    result = sel;
+    let ok = sel.length === k;
+    for (let a = 0; ok && a < sel.length; a++)
+      for (let b = a + 1; ok && b < sel.length; b++)
+        if (cdist(sel[a], sel[b]) < minD) ok = false;
+    if (ok) break;
+  }
+  return result.map(xy);
 }
 
-function newGame(diff = 1) {
+function newGame(diff = 1, opponents = 1) {
+  const n = Math.max(1, Math.min(opponents, NATIONS.length - 1));
   S = {
     turn: 1,
     nextId: 1,
@@ -326,10 +358,15 @@ function newGame(diff = 1) {
     map: null,
     res: null,
     waterComp: null,
-    players: [
-      { name: "Рим", color: "#4a90d9", techs: [], researching: null, progress: 0 },
-      { name: "Галлы", color: "#d9534f", techs: [], researching: null, progress: 0 },
-    ],
+    players: NATIONS.slice(0, n + 1).map((nat, i) => ({
+      name: nat.name,
+      color: nat.color,
+      cityNames: [...nat.cityNames],
+      techs: [],
+      researching: null,
+      progress: 0,
+      isHuman: i === 0,
+    })),
     units: [],
     cities: [],
     explored: new Array(W * H).fill(0),
@@ -342,11 +379,12 @@ function newGame(diff = 1) {
   S.map = g.map;
   S.res = g.res;
   S.waterComp = computeWaterComps(S.map);
-  const [a, b] = findStarts();
-  spawn("settler", 0, a[0], a[1]);
-  spawn("warrior", 0, a[0], a[1]);
-  spawn("settler", 1, b[0], b[1]);
-  spawn("warrior", 1, b[0], b[1]);
+  const starts = findStarts(n + 1);
+  for (let i = 0; i <= n; i++) {
+    const st = starts[i % starts.length];
+    spawn("settler", i, st[0], st[1]);
+    spawn("warrior", i, st[0], st[1]);
+  }
   computeVision();
   save();
 }
@@ -433,7 +471,7 @@ function captureCity(c, owner) {
   c.producing = null;
   c.prodStored = 0;
   if (owner === 0) addLog(`Вы захватили город ${c.name}!`);
-  else addLog(`${S.players[1].name} захватили город ${c.name}!`);
+  else addLog(`${S.players[owner].name} захватили город ${c.name}!`);
   recomputeBorders();
   checkVictory();
 }
@@ -485,7 +523,7 @@ function foundCity(u) {
     addLog("Нельзя основать город на чужой территории");
     return false;
   }
-  const name = CITY_NAMES[u.owner].pop() || `Город ${S.nextId}`;
+  const name = (S.players[u.owner] && S.players[u.owner].cityNames.pop()) || `Город ${S.nextId}`;
   const c = {
     id: S.nextId++,
     owner: u.owner,
@@ -626,7 +664,7 @@ function processEconomy() {
       c.foodStored -= need;
       if (c.owner === 0) addLog(`${c.name} вырос до ${c.pop} населения`);
     }
-    c.prodStored += y.prod * (c.owner === 1 ? diff.prodMult : 1);
+    c.prodStored += y.prod * (p.isHuman ? 1 : diff.prodMult);
     if (c.producing) {
       const def = c.producing.k === "unit" ? UNITS[c.producing.id] : BUILDINGS[c.producing.id];
       if (c.prodStored >= def.cost) {
@@ -654,7 +692,7 @@ function processEconomy() {
         c.producing = null;
       }
     }
-    if (!p.researching && c.owner === 1) {
+    if (!p.researching && !p.isHuman) {
       const avail = Object.keys(TECHS).filter((t) => techAvailable(p, t));
       if (avail.length) {
         avail.sort((a, b) => TECHS[a].cost - TECHS[b].cost);
@@ -663,7 +701,7 @@ function processEconomy() {
       }
     }
     if (p.researching) {
-      p.progress += y.sci * (c.owner === 1 ? diff.sciMult : 1);
+      p.progress += y.sci * (p.isHuman ? 1 : diff.sciMult);
       if (p.progress >= TECHS[p.researching].cost) {
         const done = p.researching;
         p.techs.push(done);
@@ -678,12 +716,16 @@ function processEconomy() {
 }
 
 function aiTurn() {
-  const p = S.players[1];
+  for (let i = 1; i < S.players.length; i++) aiTurnOne(i);
+}
+
+function aiTurnOne(owner) {
+  const p = S.players[owner];
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
-  for (const c of S.cities.filter((x) => x.owner === 1)) {
+  for (const c of S.cities.filter((x) => x.owner === owner)) {
     if (!c.producing) {
-      const settlers = S.units.filter((u) => u.owner === 1 && u.type === "settler").length;
-      const myCities = S.cities.filter((x) => x.owner === 1).length;
+      const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
+      const myCities = S.cities.filter((x) => x.owner === owner).length;
       const bestUnit = () => ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => !UNITS[t].tech || p.techs.includes(UNITS[t].tech));
       if (settlers === 0 && myCities < diff.maxCities && Math.random() < diff.settlerChance) {
@@ -701,14 +743,15 @@ function aiTurn() {
     }
   }
   for (const u of [...S.units]) {
-    if (u.owner !== 1 || !S.units.includes(u)) continue;
+    if (u.owner !== owner || !S.units.includes(u)) continue;
     if (u.type === "settler") {
       let spot = null;
       let bestSc = -1;
       for (let y = 0; y < H; y++)
         for (let x = 0; x < W; x++) {
           if (!TERRAIN[S.map[key(x, y)]].passable || cityAt(x, y)) continue;
-          if (S.tileOwner[key(x, y)] === 0) continue;
+          const to = S.tileOwner[key(x, y)];
+          if (to !== -1 && to !== u.owner) continue;
           if (dist(u.x, u.y, x, y) > 12) continue;
           const near = S.cities.some((c) => dist(c.x, c.y, x, y) < 3);
           if (near) continue;
@@ -723,21 +766,29 @@ function aiTurn() {
     }
     let target = null;
     let bestD = 99;
-    for (const e of S.units.filter((x) => x.owner === 0)) {
+    for (const e of S.units) {
+      if (e.owner === owner) continue;
       const d = dist(u.x, u.y, e.x, e.y);
       if (d < bestD && d <= diff.aggroRange) { bestD = d; target = [e.x, e.y]; }
     }
-    for (const c of S.cities.filter((x) => x.owner === 0)) {
+    for (const c of S.cities) {
+      if (c.owner === owner) continue;
       const d = dist(u.x, u.y, c.x, c.y);
       if (d < bestD && d <= diff.aggroRange) { bestD = d; target = [c.x, c.y]; }
     }
     if (!target) {
-      const home = S.cities.filter((c) => c.owner === 1)[0];
-      if (home && dist(u.x, u.y, home.x, home.y) > 3) target = [home.x, home.y];
+      let bd = Infinity;
+      for (const c of S.cities) {
+        if (c.owner !== owner) continue;
+        const d = dist(u.x, u.y, c.x, c.y);
+        if (d < bd) { bd = d; target = [c.x, c.y]; }
+      }
+      if (target && bd <= 3) target = null;
     }
     if (!target && S.turn > diff.aggroTurn) {
       let bd = Infinity;
-      for (const c of S.cities.filter((x) => x.owner === 0)) {
+      for (const c of S.cities) {
+        if (c.owner === owner) continue;
         const d = dist(u.x, u.y, c.x, c.y);
         if (d < bd) { bd = d; target = [c.x, c.y]; }
       }
@@ -746,7 +797,7 @@ function aiTurn() {
       while (u.moves > 0) {
         const adj = dist(u.x, u.y, target[0], target[1]) === 1;
         if (adj) {
-          const enemies = unitsAt(target[0], target[1]).filter((x) => x.owner === 0);
+          const enemies = unitsAt(target[0], target[1]).filter((x) => x.owner !== owner);
           if (enemies.length) { attack(u, target[0], target[1]); break; }
           const t = S.map[key(target[0], target[1])];
           if (TERRAIN[t].passable) { moveUnit(u, target[0], target[1]); break; }
@@ -785,8 +836,16 @@ function playerAlive(idx) {
 
 function checkVictory() {
   if (S.over) return;
-  if (!playerAlive(1)) S.over = { winner: 0 };
-  else if (!playerAlive(0)) S.over = { winner: 1 };
+  if (!playerAlive(0)) {
+    let winner = 0;
+    for (let i = 1; i < S.players.length; i++) {
+      if (playerAlive(i)) { winner = i; break; }
+    }
+    S.over = { winner };
+    return;
+  }
+  for (let i = 1; i < S.players.length; i++) if (playerAlive(i)) return;
+  S.over = { winner: 0 };
 }
 
 function endTurn() {
@@ -811,7 +870,19 @@ function load() {
     if (!S.res) S.res = new Array(W * H).fill(null);
     if (!S.waterComp) S.waterComp = computeWaterComps(S.map);
     if (!Array.isArray(S.tileOwner)) S.tileOwner = new Array(W * H).fill(-1);
+    if (!Array.isArray(S.players) || S.players.length === 0) return false;
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
+    S.players.forEach((p, i) => {
+      p.isHuman = i === 0;
+      if (!Array.isArray(p.techs)) p.techs = [];
+      if (!("researching" in p)) p.researching = null;
+      if (typeof p.progress !== "number") p.progress = 0;
+      if (!Array.isArray(p.cityNames)) {
+        const nat = NATIONS.find((n) => n.name === p.name);
+        const taken = new Set(S.cities.filter((c) => c.owner === i).map((c) => c.name));
+        p.cityNames = nat ? nat.cityNames.filter((n) => !taken.has(n)) : [];
+      }
+    });
     recomputeBorders();
     return !!S && !!S.map;
   } catch { return false; }
@@ -821,7 +892,7 @@ export function getState() { return S; }
 export function getVisible() { return visible; }
 
 export {
-  TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, CITY_NAMES, W, H, TS, SAVE_KEY,
+  TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, NATIONS, W, H, TS, SAVE_KEY,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity,
   cityYields, techAvailable, processEconomy, endTurn, save, load,
@@ -833,9 +904,14 @@ export function debugApi() {
     get TECHS() { return TECHS; },
     get UNITS() { return UNITS; },
     get BUILDINGS() { return BUILDINGS; },
+    get NATIONS() { return NATIONS; },
+    getNations: () => NATIONS,
     newGame,
     endTurn,
     aiTurn,
+    aiTurnOne,
+    findStarts,
+    playerAlive,
     foundCity,
     attack,
     spawn,
