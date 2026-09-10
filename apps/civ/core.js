@@ -37,6 +37,8 @@ const DIFFICULTIES = [
 
 const PEACE_WAR_LEN = 10;
 const PEACE_STRENGTH = 0.6;
+const TRADE_COOLDOWN = 10;
+const MIL_TECHS = ["iron", "horsebackriding", "machinery", "feudalism", "gunpowder"];
 
 const BUILDINGS = {
   granary: { name: "Амбар", cost: 40, tech: "pottery", desc: "+2 еды", effects: { foodFlat: 2 } },
@@ -476,7 +478,7 @@ function newGame(diff = 1, opponents = 1) {
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
-      S.relations[relKey(i, j)] = { war: false, since: -1 };
+      S.relations[relKey(i, j)] = { war: false, since: -1, lastTradeTurn: -99 };
   const g = generateMap();
   S.map = g.map;
   S.res = g.res;
@@ -892,12 +894,19 @@ function techAvailable(p, id) {
   return !p.techs.includes(id) && t.req.every((r) => p.techs.includes(r));
 }
 
+function grantTech(p, id) {
+  if (!TECHS[id] || p.techs.includes(id)) return false;
+  p.techs.push(id);
+  if (p.researching === id) { p.researching = null; p.progress = 0; }
+  addLog(`Получена технология: ${TECHS[id].name}`);
+  return true;
+}
+
 function grantFreeTech(p) {
   const avail = Object.keys(TECHS).filter((t) => techAvailable(p, t))
     .sort((a, b) => TECHS[a].cost - TECHS[b].cost);
   if (!avail.length) return null;
-  p.techs.push(avail[0]);
-  if (p.researching === avail[0]) { p.researching = null; p.progress = 0; }
+  grantTech(p, avail[0]);
   return avail[0];
 }
 
@@ -1355,6 +1364,38 @@ function offerPeace(humanIdx, aiIdx) {
   return false;
 }
 
+function aiAcceptsDeal(ai, other, givesId, getsId) {
+  const ratio = MIL_TECHS.includes(givesId) && strengthOf(other) > strengthOf(ai) ? 1 : 0.8;
+  return TECHS[getsId].cost >= TECHS[givesId].cost * ratio;
+}
+
+function valueOfDeal(aiIdx, aiGivesId, aiGetsId) {
+  return aiAcceptsDeal(aiIdx, 0, aiGivesId, aiGetsId);
+}
+
+function offerTechTrade(fromIdx, toIdx, giveTechId, wantTechId) {
+  const from = S.players[fromIdx], to = S.players[toIdx];
+  const r = S.relations[relKey(fromIdx, toIdx)];
+  const no = (reason) => {
+    addLog(`Обмен технологиями отклонён: ${reason}`);
+    return { ok: false, reason };
+  };
+  if (!r || r.war) return no("торговля возможна только в мирное время");
+  if (!TECHS[giveTechId] || !TECHS[wantTechId]) return no("неизвестная технология");
+  if (!from.techs.includes(giveTechId)) return no("отдаваемая технология не изучена");
+  if (to.techs.includes(giveTechId)) return no("технология уже известна партнёру");
+  if (!to.techs.includes(wantTechId)) return no("у партнёра нет запрашиваемой технологии");
+  if (from.techs.includes(wantTechId)) return no("технология уже изучена вами");
+  if (S.turn - (r.lastTradeTurn ?? -99) < TRADE_COOLDOWN) return no("обмен был недавно");
+  if (!to.isHuman && !aiAcceptsDeal(toIdx, fromIdx, wantTechId, giveTechId))
+    return no("сделка невыгодна для партнёра");
+  grantTech(from, wantTechId);
+  grantTech(to, giveTechId);
+  r.lastTradeTurn = S.turn;
+  addLog(`Обмен технологиями: ${from.name} ↔ ${to.name}`);
+  return { ok: true };
+}
+
 function aiDiplomacy() {
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
   for (const k of Object.keys(S.relations)) {
@@ -1398,6 +1439,25 @@ function aiDiplomacy() {
       if (atWar(a, b) && (readyForPeace(a, b) || readyForPeace(b, a))) makePeace(a, b);
   for (let j = 1; j < S.players.length; j++)
     if (atWar(0, j) && readyForPeace(j, 0)) addLog(`${S.players[j].name} готовы к миру`);
+  for (let a = 1; a < S.players.length; a++)
+    for (let b = a + 1; b < S.players.length; b++) {
+      if (atWar(a, b) || !playerAlive(a) || !playerAlive(b)) continue;
+      const rel = S.relations[relKey(a, b)];
+      if (S.turn - (rel.lastTradeTurn ?? -99) < TRADE_COOLDOWN || Math.random() >= 0.2) continue;
+      const pa = S.players[a], pb = S.players[b];
+      let traded = false;
+      for (const x of pa.techs) {
+        if (traded) break;
+        if (pb.techs.includes(x)) continue;
+        for (const y of pb.techs) {
+          if (pa.techs.includes(y)) continue;
+          if (!aiAcceptsDeal(a, b, x, y) || !aiAcceptsDeal(b, a, y, x)) continue;
+          offerTechTrade(a, b, x, y);
+          traded = true;
+          break;
+        }
+      }
+    }
 }
 
 function playerAlive(idx) {
@@ -1465,8 +1525,10 @@ function load() {
       S.relations = {};
       for (let i = 0; i < S.players.length; i++)
         for (let j = i + 1; j < S.players.length; j++)
-          S.relations[relKey(i, j)] = { war: false, since: -1 };
+          S.relations[relKey(i, j)] = { war: false, since: -1, lastTradeTurn: -99 };
     }
+    for (const k of Object.keys(S.relations))
+      if (typeof S.relations[k].lastTradeTurn !== "number") S.relations[k].lastTradeTurn = -99;
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
     if (!Array.isArray(S.religions)) S.religions = [];
     if (!Array.isArray(S.wonders)) S.wonders = [];
@@ -1505,7 +1567,7 @@ export {
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
-  relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
+  relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
   unitAvailable, resourceConnected, hasMarble, wonderCost,
 };
 
@@ -1536,6 +1598,9 @@ export function debugApi() {
     makePeace,
     offerPeace,
     strengthOf,
+    offerTechTrade,
+    valueOfDeal,
+    grantTech,
     findStarts,
     playerAlive,
     foundCity,

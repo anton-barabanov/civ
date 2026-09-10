@@ -701,6 +701,132 @@ check("old save without relations migrates to peace", api.load() === true &&
   Object.values(api.S.relations).every((r) => r.war === false && r.since === -1));
 
 api.newGame(1);
+const gtp = api.S.players[0];
+check("grantTech adds tech and logs", api.grantTech(gtp, "agriculture") === true &&
+  gtp.techs.includes("agriculture") && api.S.log.some((l) => l.includes("Получена технология: Земледелие")));
+check("grantTech ignores duplicates", api.grantTech(gtp, "agriculture") === false &&
+  gtp.techs.filter((t) => t === "agriculture").length === 1);
+gtp.researching = "writing";
+gtp.progress = 5;
+api.grantTech(gtp, "writing");
+check("grantTech resets research on match", gtp.researching === null && gtp.progress === 0 && gtp.techs.includes("writing"));
+gtp.researching = "archery";
+gtp.progress = 3;
+api.grantTech(gtp, "mysticism");
+check("grantTech keeps research on mismatch", gtp.researching === "archery" && gtp.progress === 3 && gtp.techs.includes("mysticism"));
+check("grantFreeTech regression via grantTech", api.grantFreeTech(gtp) === "archery" && gtp.techs.includes("archery"));
+
+api.newGame(1);
+api.S.players[0].techs.push("writing");
+api.S.players[1].techs.push("sailing");
+const tt1 = api.offerTechTrade(0, 1, "writing", "sailing");
+check("tech trade succeeds in peace, both sides get techs", tt1.ok === true &&
+  api.S.players[0].techs.includes("sailing") && api.S.players[1].techs.includes("writing"));
+check("trade sets lastTradeTurn", api.S.relations["0:1"].lastTradeTurn === api.S.turn);
+check("trade logged", api.S.log.some((l) => l.includes("Обмен технологиями:")));
+api.S.players[0].techs.push("pottery");
+api.S.players[1].techs.push("mysticism");
+const ltt = api.S.relations["0:1"].lastTradeTurn;
+const tt2 = api.offerTechTrade(0, 1, "pottery", "mysticism");
+check("trade blocked by cooldown", tt2.ok === false && tt2.reason.includes("недавно") &&
+  !api.S.players[0].techs.includes("mysticism") && !api.S.players[1].techs.includes("pottery") &&
+  api.S.relations["0:1"].lastTradeTurn === ltt);
+api.S.turn += 9;
+const tt3 = api.offerTechTrade(0, 1, "pottery", "mysticism");
+check("cooldown still active at 9 turns", tt3.ok === false && tt3.reason.includes("недавно"));
+api.S.turn += 1;
+const tt4 = api.offerTechTrade(0, 1, "pottery", "mysticism");
+check("trade works after 10 turns", tt4.ok === true &&
+  api.S.players[0].techs.includes("mysticism") && api.S.players[1].techs.includes("pottery") &&
+  api.S.relations["0:1"].lastTradeTurn === api.S.turn);
+
+api.newGame(1);
+api.S.players[0].techs.push("writing");
+api.S.players[1].techs.push("sailing");
+api.declareWar(0, 1);
+check("trade refused at war", api.offerTechTrade(0, 1, "writing", "sailing").ok === false);
+api.makePeace(0, 1);
+check("trade works after peace", api.offerTechTrade(0, 1, "writing", "sailing").ok === true);
+
+api.newGame(1);
+api.S.players[0].techs.push("agriculture");
+api.S.players[1].techs.push("gunpowder");
+check("AI refuses cheap-for-expensive", api.offerTechTrade(0, 1, "agriculture", "gunpowder").ok === false);
+api.newGame(1);
+api.S.players[0].techs.push("education");
+api.S.players[1].techs.push("literature");
+check("AI accepts within 0.8 parity", api.offerTechTrade(0, 1, "education", "literature").ok === true &&
+  api.S.players[0].techs.includes("literature") && api.S.players[1].techs.includes("education"));
+
+api.newGame(1);
+api.S.players[1].techs.push("sailing");
+check("trade refuses unknown tech", api.offerTechTrade(0, 1, "nope", "sailing").ok === false);
+check("trade refuses unowned tech", api.offerTechTrade(0, 1, "writing", "sailing").ok === false);
+
+api.newGame(1);
+api.S.players[0].techs.push("wheel", "horsebackriding");
+api.S.players[1].techs.push("bronze", "iron");
+const mtStart = api.S.units.find((u) => u.owner === 0);
+const mtW1 = api.spawn("warrior", 0, mtStart.x, mtStart.y);
+const mtW2 = api.spawn("warrior", 0, mtStart.x, mtStart.y);
+check("AI refuses military tech to stronger player",
+  api.valueOfDeal(1, "iron", "horsebackriding") === false &&
+  api.offerTechTrade(0, 1, "horsebackriding", "iron").ok === false);
+api.S.units = api.S.units.filter((u) => u !== mtW1 && u !== mtW2);
+check("AI gives military tech at equal strength",
+  api.valueOfDeal(1, "iron", "horsebackriding") === true &&
+  api.offerTechTrade(0, 1, "horsebackriding", "iron").ok === true &&
+  api.S.players[0].techs.includes("iron") && api.S.players[1].techs.includes("horsebackriding"));
+
+api.newGame(1);
+api.S.players[0].techs.push("pottery");
+api.S.players[0].researching = "sailing";
+api.S.players[0].progress = 10;
+api.S.players[1].techs.push("sailing");
+const ttR = api.offerTechTrade(0, 1, "pottery", "sailing");
+check("received tech switches research", ttR.ok === true && api.S.players[0].researching === null &&
+  api.S.players[0].progress === 0 && api.S.players[0].techs.includes("sailing"));
+
+api.newGame(1, 2);
+api.S.players[1].techs.push("writing");
+api.S.players[2].techs.push("sailing");
+const aiAiRnd = Math.random;
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = aiAiRnd; }
+check("AI-AI tech trade in aiDiplomacy", api.S.players[1].techs.includes("sailing") &&
+  api.S.players[2].techs.includes("writing") && api.S.relations["1:2"].lastTradeTurn === api.S.turn &&
+  api.S.log.some((l) => l.includes("Обмен технологиями:")));
+check("human untouched by AI-AI trade", api.S.players[0].techs.length === 0);
+api.S.players[1].techs.push("mysticism");
+api.S.players[2].techs.push("pottery");
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = aiAiRnd; }
+check("AI-AI trade cooldown blocks repeat", !api.S.players[1].techs.includes("pottery") &&
+  !api.S.players[2].techs.includes("mysticism"));
+api.newGame(1, 2);
+api.S.players[1].techs.push("writing");
+api.S.players[2].techs.push("sailing");
+Math.random = () => 0.99;
+try { api.aiDiplomacy(); } finally { Math.random = aiAiRnd; }
+check("AI-AI trade needs chance", !api.S.players[1].techs.includes("sailing"));
+
+api.newGame(1, 2);
+api.save();
+const rawTt = JSON.parse(store["civ1_save"]);
+for (const k of Object.keys(rawTt.relations)) delete rawTt.relations[k].lastTradeTurn;
+store["civ1_save"] = JSON.stringify(rawTt);
+check("old save migrates lastTradeTurn", api.load() === true &&
+  Object.values(api.S.relations).every((r) => r.lastTradeTurn === -99));
+api.S.players[0].techs.push("writing");
+api.S.players[1].techs.push("sailing");
+check("trade available right after migration", api.offerTechTrade(0, 1, "writing", "sailing").ok === true);
+const ttTurn = api.S.relations["0:1"].lastTradeTurn;
+api.save();
+check("lastTradeTurn survives save-load roundtrip", api.load() === true &&
+  api.S.relations["0:1"].lastTradeTurn === ttTurn);
+
+
+api.newGame(1);
 check("religions empty after newGame", Array.isArray(api.S.religions) && api.S.religions.length === 0 && api.S.cities.length === 0);
 check("RELIGIONS table exposed", !!api.RELIGIONS && ["oracle", "muses", "sungod"].every((id) =>
   api.RELIGIONS[id] && api.RELIGIONS[id].name && api.RELIGIONS[id].icon && !!api.TECHS[api.RELIGIONS[id].tech]));

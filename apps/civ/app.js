@@ -4,7 +4,7 @@ import {
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
-  relKey, atWar, declareWar, offerPeace, strengthOf,
+  relKey, atWar, declareWar, offerPeace, strengthOf, offerTechTrade,
   RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost,
@@ -464,9 +464,12 @@ function showTech() {
   });
 }
 
+let diploTrade = { open: null, give: null, want: null, status: "" };
+
 function showDiplo() {
   closeModal();
   const S = getState();
+  const me = S.players[0];
   const m = document.createElement("div");
   m.className = "civ-modal";
   m.id = "civ-modal";
@@ -478,14 +481,43 @@ function showDiplo() {
           const i = idx + 1;
           const rel = (S.relations || {})[relKey(0, i)] || { war: false, since: -1 };
           const status = rel.war ? `⚔ война с хода ${rel.since}` : "🕊 мир";
+          const cd = 10 - (S.turn - (rel.lastTradeTurn ?? -99));
+          const cooldown = !rel.war && cd > 0;
+          const open = !rel.war && diploTrade.open === i;
+          const mine = me.techs.filter((t) => !p.techs.includes(t));
+          const theirs = p.techs.filter((t) => !me.techs.includes(t));
           return `<div class="civ-prod">
             <b><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${p.color};margin-right:6px;vertical-align:middle"></span>${escapeHtml(p.name)}</b>
             <span>${status} · сила: ${strengthOf(i)}</span>
             <span>
               <button class="btn text" data-war="${i}" ${rel.war ? "disabled" : ""}>Объявить войну</button>
               <button class="btn text" data-peace="${i}" ${rel.war ? "" : "disabled"}>Предложить мир</button>
+              ${rel.war
+                ? `<button class="btn text" disabled>Торговля</button> <i>Только в мирное время</i>`
+                : `<button class="btn text" data-trade="${i}">${open ? "Скрыть торговлю" : "Торговля"}</button>${cooldown ? ` <i>обмен доступен через ${cd} ход.</i>` : ""}`}
             </span>
-          </div>`;
+          </div>
+          ${open ? `
+          <div class="civ-prod" style="flex-direction:column;align-items:stretch;gap:6px">
+            <b>🔬 Обмен технологиями</b>
+            ${cooldown ? `<span>Обмен доступен через ${cd} ходов</span>` : ""}
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <div style="flex:1;min-width:180px"><b>Отдаю:</b>
+                <div class="civ-prod-list" style="margin-top:4px">
+                  ${mine.length ? mine.map((t) => `<button class="civ-prod ${diploTrade.give === t ? "sel" : ""}" data-give="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий для обмена</span>"}
+                </div>
+              </div>
+              <div style="flex:1;min-width:180px"><b>Прошу:</b>
+                <div class="civ-prod-list" style="margin-top:4px">
+                  ${theirs.length ? theirs.map((t) => `<button class="civ-prod ${diploTrade.want === t ? "sel" : ""}" data-want="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий для обмена</span>"}
+                </div>
+              </div>
+            </div>
+            <div>
+              <button class="btn text" data-offer="${i}" ${diploTrade.give && diploTrade.want && !cooldown ? "" : "disabled"}>Предложить обмен 1:1</button>
+              ${diploTrade.status ? `<span> ${escapeHtml(diploTrade.status)}</span>` : ""}
+            </div>
+          </div>` : ""}`;
         }).join("")}
       </div>
       <button class="btn text" id="civ-close">Закрыть</button>
@@ -509,6 +541,39 @@ function showDiplo() {
       save();
       showDiplo();
       refresh();
+    };
+  });
+  m.querySelectorAll("[data-trade]").forEach((b) => {
+    b.onclick = () => {
+      const i = Number(b.dataset.trade);
+      diploTrade = { open: diploTrade.open === i ? null : i, give: null, want: null, status: "" };
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-give]").forEach((b) => {
+    b.onclick = () => {
+      diploTrade.give = diploTrade.give === b.dataset.give ? null : b.dataset.give;
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-want]").forEach((b) => {
+    b.onclick = () => {
+      diploTrade.want = diploTrade.want === b.dataset.want ? null : b.dataset.want;
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-offer]").forEach((b) => {
+    b.onclick = () => {
+      const i = Number(b.dataset.offer);
+      const r = offerTechTrade(0, i, diploTrade.give, diploTrade.want);
+      diploTrade.status = r.ok ? "Обмен состоялся" : `Отказ: ${r.reason}`;
+      if (r.ok) {
+        diploTrade.give = null;
+        diploTrade.want = null;
+        save();
+        refresh();
+      }
+      showDiplo();
     };
   });
 }
