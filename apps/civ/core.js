@@ -13,6 +13,7 @@ const UNITS = {
   settler: { name: "Поселенец", letter: "П", icon: "🛖", atk: 0, def: 1, moves: 1, cost: 30, tech: null, upgrade: null },
   scout: { name: "Разведчик", letter: "Р", icon: "🧭", atk: 1, def: 1, moves: 2, cost: 15, tech: null, upgrade: null },
   worker: { name: "Рабочий", letter: "Т", icon: "👷", atk: 0, def: 1, moves: 1, cost: 25, tech: "pottery", upgrade: null },
+  missionary: { name: "Миссионер", letter: "Мс", icon: "🕯", atk: 0, def: 1, moves: 2, cost: 40, tech: "mysticism", upgrade: null },
   warrior: { name: "Воин", letter: "В", icon: "⚔️", atk: 2, def: 2, moves: 1, cost: 20, tech: null, upgrade: "swordsman" },
   archer: { name: "Лучник", letter: "Л", icon: "🏹", atk: 3, def: 4, moves: 1, cost: 35, tech: "archery", upgrade: "crossbowman" },
   swordsman: { name: "Мечник", letter: "М", icon: "🗡️", atk: 5, def: 4, moves: 1, cost: 45, tech: "iron", res: ["iron"], upgrade: "musketman" },
@@ -466,6 +467,7 @@ function newGame(diff = 1, opponents = 1) {
       gpPoints: 0,
       gpNext: GP_BASE_THRESHOLD,
       gpRotate: 0,
+      stateReligion: null,
       isHuman: i === 0,
     })),
     units: [],
@@ -584,6 +586,7 @@ function reachable(u) {
       const foe = other ? other.owner : (city && city.owner !== u.owner ? city.owner : null);
       if (foe !== null) {
         if (atWar(u.owner, foe)) res.set(k, 0);
+        else if (u.type === "missionary" && !other && city) res.set(k, m - 1);
         continue;
       }
       seen.add(k);
@@ -598,7 +601,7 @@ function reachable(u) {
 function moveUnit(u, x, y) {
   if (u.work) { addLog("Рабочий занят"); return; }
   const oc = cityAt(x, y);
-  if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner)) return;
+  if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner) && u.type !== "missionary") return;
   const cargo = isNaval(u) ? unitsAt(u.x, u.y).filter((o) => !isNaval(o)) : [];
   u.x = x;
   u.y = y;
@@ -606,7 +609,7 @@ function moveUnit(u, x, y) {
   for (const p of cargo) { p.x = x; p.y = y; }
   computeVision();
   const c = cityAt(x, y);
-  if (c && c.owner !== u.owner && !unitsAt(x, y).some((o) => o.owner === c.owner)) {
+  if (c && c.owner !== u.owner && atWar(u.owner, c.owner) && !unitsAt(x, y).some((o) => o.owner === c.owner)) {
     captureCity(c, u.owner);
   }
 }
@@ -821,7 +824,8 @@ function buildingEffects(c) {
 }
 
 function stateReligionBonus(c) {
-  return 0;
+  const p = S.players[c.owner];
+  return p.stateReligion && c.religion === p.stateReligion ? 1 : 0;
 }
 
 function cityHappiness(c) {
@@ -896,6 +900,43 @@ function spreadReligions() {
   }
 }
 
+function spreadFaith(unitId) {
+  const u = unitById(unitId);
+  if (!u) return { ok: false, reason: "юнит не найден" };
+  if (u.type !== "missionary") return { ok: false, reason: "это не миссионер" };
+  const c = cityAt(u.x, u.y);
+  if (!c) return { ok: false, reason: "миссионер должен быть в городе" };
+  if (atWar(u.owner, c.owner)) return { ok: false, reason: "в военное время вера не распространяется" };
+  const p = S.players[u.owner];
+  const rel = u.relOf || p.stateReligion || (S.religions.find((r) => r.owner === u.owner) || {}).id || null;
+  if (!rel || !RELIGIONS[rel]) return { ok: false, reason: "у миссионера нет религии" };
+  c.religion = rel;
+  c.relPressure = 0;
+  S.units = S.units.filter((x) => x !== u);
+  if (S.sel === u.id) S.sel = null;
+  addLog(`${p.name}: миссионеры распространили ${RELIGIONS[rel].name} в городе ${c.name}`);
+  return { ok: true };
+}
+
+function declareStateReligion(pIdx, relId) {
+  const p = S.players[pIdx];
+  if (!p) return { ok: false, reason: "игрок не найден" };
+  if (!S.religions.some((r) => r.id === relId)) return { ok: false, reason: "религия не основана" };
+  if (p.stateReligion === relId) return { ok: false, reason: "это уже государственная религия" };
+  if (!S.cities.some((c) => c.owner === pIdx && c.religion === relId))
+    return { ok: false, reason: "религии нет в городах игрока" };
+  p.stateReligion = relId;
+  addLog(`${p.name}: государственная религия — ${RELIGIONS[relId].name}`);
+  return { ok: true };
+}
+
+function relWarFactor(i, j) {
+  const a = S.players[i] && S.players[i].stateReligion;
+  const b = S.players[j] && S.players[j].stateReligion;
+  if (a && b) return a === b ? 0.5 : 1.3;
+  return 1;
+}
+
 function cityYields(c) {
   let food = 2, prod = 1;
   const cand = [];
@@ -929,7 +970,8 @@ function cityYields(c) {
   sci = Math.round(sci * e.sciMult * pe.sciMult);
   const trade = tradeActive(c);
   const tradeGold = trade ? 2 * e.tradeMult * pe.tradeMult : 0;
-  const gold = 3 + Math.floor(c.pop / 2) + tradeGold;
+  const holyGold = (S.players[c.owner].stateReligion === c.religion && isHolyCity(c)) ? 2 : 0;
+  const gold = 3 + Math.floor(c.pop / 2) + tradeGold + holyGold;
   return { food, prod, sci, gold, trade, tradeGold };
 }
 
@@ -1037,7 +1079,8 @@ function processEconomy() {
     const p = S.players[c.owner];
     const y = cityYields(c);
     const e = buildingEffects(c);
-    const cultGrowth = 1 + e.culture + (c.religion ? 1 : 0);
+    const cultGrowth = 1 + e.culture + (c.religion ? 1 : 0) +
+      (p.stateReligion && c.religion === p.stateReligion ? 1 : 0);
     c.culture = (c.culture || 0) + cultGrowth;
     p.gpPoints = (p.gpPoints || 0) + Math.floor(cultGrowth / 2);
     const hap = cityHappiness(c);
@@ -1096,6 +1139,7 @@ function processEconomy() {
               if (c.owner === 0) addLog(`${c.name}: построен ${spec.name}`);
             }
             if (born) born.atkBonus = e.unitAtk;
+            if (born && born.type === "missionary" && c.religion) born.relOf = c.religion;
           } else {
             c.buildings.push(c.producing.id);
             if (c.owner === 0) addLog(`${c.name}: построена ${def.name}`);
@@ -1161,6 +1205,7 @@ function buyForGold(cityId, k, id) {
   if (k === "building" && c.buildings.includes(id)) return { ok: false, reason: "здание уже построено" };
   if (c.producing && c.producing.k === k && c.producing.id === id) c.producing = null;
   if (k === "unit" && def.naval && !adjWater(c.x, c.y)) return { ok: false, reason: "нет доступа к воде" };
+  if (k === "unit" && id === "missionary" && !c.religion) return { ok: false, reason: "в городе нужна религия" };
   const price = Math.ceil(def.cost * 3);
   if (p.gold < price) return { ok: false, reason: "недостаточно золота" };
   p.gold -= price;
@@ -1173,6 +1218,7 @@ function buyForGold(cityId, k, id) {
       born = spawn(id, c.owner, c.x, c.y);
     }
     born.atkBonus = buildingEffects(c).unitAtk;
+    if (id === "missionary" && c.religion) born.relOf = c.religion;
     if (c.owner === 0) addLog(`${c.name}: за ${price}🪙 нанят ${def.name}`);
   } else {
     c.buildings.push(id);
@@ -1222,6 +1268,16 @@ function aiTurn() {
 function aiTurnOne(owner) {
   const p = S.players[owner];
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  if (!p.stateReligion) {
+    const mine = S.cities.filter((c) => c.owner === owner);
+    let bestRel = null, bestN = 0;
+    for (const id of Object.keys(RELIGIONS)) {
+      const n = mine.filter((c) => c.religion === id).length;
+      if (n > bestN) { bestN = n; bestRel = id; }
+    }
+    if (bestRel && bestN > mine.length / 2) declareStateReligion(owner, bestRel);
+  }
+  const aiRel = p.stateReligion || (S.religions.find((r) => r.owner === owner) || {}).id || null;
   const myUnits = S.units.filter((u) => u.owner === owner);
   const myCities = S.cities.filter((c) => c.owner === owner);
   const military = () => myUnits.filter((u) => !UNITS[u.type].gp && UNITS[u.type].atk > 0)
@@ -1273,6 +1329,10 @@ function aiTurnOne(owner) {
         c.producing = { k: "unit", id: "settler" };
       } else if (myCities >= 2 && myUnits.filter((u) => u.type === "worker").length < myCities && unitAvailable(owner, "worker")) {
         c.producing = { k: "unit", id: "worker" };
+      } else if (aiRel && unitAvailable(owner, "missionary") && c.religion &&
+        !myUnits.some((u) => u.type === "missionary") &&
+        S.cities.some((o) => o.owner !== owner && !atWar(owner, o.owner) && o.religion !== aiRel && dist(c.x, c.y, o.x, o.y) <= 6)) {
+        c.producing = { k: "unit", id: "missionary" };
       } else if (c.pop >= 3 && !c.buildings.includes("library") && Math.random() < 0.35) {
         const avail = ["granary", "library", "temple", "amphitheater", "forge", "market"].filter(
           (b) => !c.buildings.includes(b) && (!BUILDINGS[b].tech || p.techs.includes(BUILDINGS[b].tech))
@@ -1359,6 +1419,41 @@ function aiTurnOne(owner) {
         if (u.x + "," + u.y === before) break;
       }
       if (u.x === best.x && u.y === best.y) startImprovement(u.id, best.kind);
+      continue;
+    }
+    if (u.type === "missionary") {
+      const war = S.players.some((_, i) => i !== owner && atWar(owner, i));
+      if (war || !aiRel) {
+        const home = S.cities.filter((c) => c.owner === owner)
+          .sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y) || a.id - b.id)[0];
+        if (home) {
+          while (u.moves > 0 && (u.x !== home.x || u.y !== home.y)) {
+            const before = u.x + "," + u.y;
+            stepToward(u, home.x, home.y);
+            if (u.x + "," + u.y === before) break;
+          }
+        } else {
+          u.moves = 0;
+        }
+        continue;
+      }
+      let tgt = null, tdist = Infinity;
+      for (const c of S.cities) {
+        if (c.religion === aiRel) continue;
+        if (c.owner !== owner && atWar(owner, c.owner)) continue;
+        const d = dist(u.x, u.y, c.x, c.y);
+        if (d < tdist || (d === tdist && tgt && c.id < tgt.id)) { tdist = d; tgt = c; }
+      }
+      if (tgt) {
+        while (u.moves > 0 && (u.x !== tgt.x || u.y !== tgt.y)) {
+          const before = u.x + "," + u.y;
+          stepToward(u, tgt.x, tgt.y);
+          if (u.x + "," + u.y === before) break;
+        }
+        if (u.x === tgt.x && u.y === tgt.y) spreadFaith(u.id);
+      } else {
+        u.moves = 0;
+      }
       continue;
     }
     if (u.type === "settler") {
@@ -1452,7 +1547,7 @@ function stepToward(u, tx, ty) {
     if (!canEnter(u, nx, ny)) return false;
     if (unitsAt(nx, ny).some((o) => o.owner !== u.owner)) return false;
     const c = cityAt(nx, ny);
-    if (c && c.owner !== u.owner) return false;
+    if (c && c.owner !== u.owner && !(u.type === "missionary" && !atWar(u.owner, c.owner))) return false;
     return true;
   });
   if (!opts.length) { u.moves = 0; return; }
@@ -1496,7 +1591,7 @@ function strengthOf(i) {
 function readyForPeace(weak, strong) {
   const r = S.relations[relKey(weak, strong)];
   return !!r && r.war && S.turn - r.since > PEACE_WAR_LEN &&
-    strengthOf(weak) < PEACE_STRENGTH * strengthOf(strong);
+    strengthOf(weak) < PEACE_STRENGTH * strengthOf(strong) * relWarFactor(weak, strong);
 }
 
 function offerPeace(humanIdx, aiIdx) {
@@ -1510,7 +1605,7 @@ function offerPeace(humanIdx, aiIdx) {
 
 function aiAcceptsDeal(ai, other, givesId, getsId) {
   const ratio = MIL_TECHS.includes(givesId) && strengthOf(other) > strengthOf(ai) ? 1 : 0.8;
-  return TECHS[getsId].cost >= TECHS[givesId].cost * ratio;
+  return TECHS[getsId].cost >= TECHS[givesId].cost * ratio * relWarFactor(ai, other);
 }
 
 function valueOfDeal(aiIdx, aiGivesId, aiGetsId) {
@@ -1575,7 +1670,7 @@ function aiDiplomacy() {
     if (target === -1) continue;
     const si = strengthOf(i);
     const sj = strengthOf(target);
-    if (sj > 0 && si > sj && Math.random() < Math.min(0.5, 0.05 + 0.25 * (si / sj - 1)))
+    if (sj > 0 && si > sj && Math.random() < Math.min(0.5, 0.05 + 0.25 * (si / sj - 1)) * relWarFactor(i, target))
       declareWar(i, target);
   }
   for (let a = 1; a < S.players.length; a++)
@@ -1694,6 +1789,7 @@ function load() {
       if (typeof p.gpPoints !== "number") p.gpPoints = 0;
       if (typeof p.gpNext !== "number") p.gpNext = GP_BASE_THRESHOLD;
       if (typeof p.gpRotate !== "number") p.gpRotate = 0;
+      if (!("stateReligion" in p)) p.stateReligion = null;
       if (!Array.isArray(p.cityNames)) {
         const nat = NATIONS.find((n) => n.name === p.name);
         const taken = new Set(S.cities.filter((c) => c.owner === i).map((c) => c.name));
@@ -1715,6 +1811,7 @@ export {
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
+  spreadFaith, declareStateReligion, relWarFactor,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
   unitAvailable, resourceConnected, hasMarble, wonderCost, startImprovement, cancelWork,
 };
@@ -1772,6 +1869,9 @@ export function debugApi() {
     techAvailable,
     grantFreeTech,
     useGreatPerson,
+    spreadFaith,
+    declareStateReligion,
+    relWarFactor,
     cityYields,
     cityHappiness,
     buildingEffects,

@@ -261,6 +261,13 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     add(group, geo("u:shovel", () => new THREE.CylinderGeometry(0.012, 0.012, 0.48, 5)), woodDark, 0.17, 0.24, 0.05).rotation.z = -0.25;
     add(group, geo("u:shovelBlade", () => new THREE.BoxGeometry(0.075, 0.05, 0.022)), metal, 0.225, 0.045, 0.05).rotation.z = -0.25;
     add(group, geo("u:sack", () => new THREE.SphereGeometry(0.07, 7, 6)), mat(C.sand), -0.15, 0.055, 0.09).scale.set(1, 0.85, 1);
+  } else if (unitType === "missionary") {
+    addFigure(group, om, 0.09, 0.35, 0, 0);
+    add(group, geo("u:misRobe", () => new THREE.ConeGeometry(0.115, 0.3, 7)), om, 0, 0.15, 0);
+    add(group, geo("u:misStaff", () => new THREE.CylinderGeometry(0.012, 0.012, 0.5, 5)), woodDark, 0.16, 0.25, 0.05).rotation.z = -0.12;
+    add(group, geo("u:misFlame", () => new THREE.SphereGeometry(0.028, 6, 5)), mat(C.gold), 0.16, 0.52, 0.05);
+    add(group, geo("u:misBook", () => new THREE.BoxGeometry(0.12, 0.03, 0.15)), mat(C.sail), 0.145, 0.3, -0.03).rotation.z = 0.4;
+    add(group, geo("u:misBookTrim", () => new THREE.BoxGeometry(0.125, 0.012, 0.03)), mat(C.gold), 0.145, 0.3, -0.1).rotation.z = 0.4;
   } else if (unitType === "gp_scientist") {
     addSage(group, om);
     add(group, geo("u:gpScroll", () => new THREE.CylinderGeometry(0.035, 0.035, 0.18, 8)), mat(C.sail), 0, 0.3, 0.13).rotation.x = Math.PI / 2;

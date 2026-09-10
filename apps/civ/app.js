@@ -8,7 +8,7 @@ import {
   RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
-  startImprovement, cancelWork,
+  startImprovement, cancelWork, spreadFaith, declareStateReligion,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -239,6 +239,13 @@ function renderPanel() {
         body += `<button class="btn primary" id="civ-mine" ${mr ? `disabled title="${mr}"` : ""}>⚒ Построить шахту (3 хода)</button>`;
       }
     }
+    if (sel.type === "missionary") {
+      const mCity = cityAt(sel.x, sel.y);
+      let why = "";
+      if (!mCity) why = "Миссионер должен быть в городе";
+      else if (mCity.owner !== 0 && atWar(0, mCity.owner)) why = "В военное время вера не распространяется";
+      body += `<button class="btn primary" id="civ-spread" ${why ? `disabled title="${why}"` : ""}>🕯 Распространить веру</button>`;
+    }
     const ownCity = cityAt(sel.x, sel.y);
     if (ownCity && ownCity.owner === 0) {
       body += `<button class="btn text" id="civ-city">🏛 Открыть город</button>`;
@@ -314,6 +321,11 @@ function renderPanel() {
   if (gb) gb.onclick = () => {
     const u = unitById(getState().sel);
     if (u && useGreatPerson(u.id).ok) { save(); refresh(); }
+  };
+  const sp = document.getElementById("civ-spread");
+  if (sp) sp.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u && spreadFaith(u.id).ok) { save(); refresh(); }
   };
 }
 
@@ -393,10 +405,12 @@ function showCity(c) {
     .filter(([, d]) => !d.gp && (!d.tech || p.techs.includes(d.tech)) && (!d.naval || isCoastal(c.x, c.y)))
     .map(([id, d]) => {
       const need = (d.res || []).filter((r) => !resourceConnected(0, r));
+      const noRel = id === "missionary" && !c.religion;
       return {
         k: "unit", id, name: d.name, cost: d.cost,
-        info: `⚔${d.atk} 🛡${d.def}${d.naval ? " ⛵" : ""}${need.length ? ` · нужен ресурс: ${need.map((r) => `${RESOURCES[r].icon} ${RESOURCES[r].name}`).join(", ")} в границах` : ""}`,
-        ok: !need.length,
+        info: `⚔${d.atk} 🛡${d.def}${d.naval ? " ⛵" : ""}${need.length ? ` · нужен ресурс: ${need.map((r) => `${RESOURCES[r].icon} ${RESOURCES[r].name}`).join(", ")} в границах` : ""}${noRel ? " · в городе нужна религия" : ""}`,
+        ok: !need.length && !noRel,
+        bad: noRel ? "в городе нужна религия" : "нужен ресурс в границах",
       };
     });
   const bldOpts = Object.entries(BUILDINGS)
@@ -444,7 +458,7 @@ function showCity(c) {
               <b>${o.name}</b><span>${o.info}</span><span>🔨 ${o.cost}</span>
             </button>
             <button class="btn text civ-buy" style="width:auto;white-space:nowrap;padding:6px 10px;font-size:12.5px"
-                    data-k="${o.k}" data-id="${o.id}" ${buyBlocked ? `disabled title="${o.ok === false ? "нужен ресурс в границах" : `Недостаточно золота: нужно ${price}🪙`}"` : `title="Купить за ${price}🪙"`}>Купить 🪙${price}</button>
+                    data-k="${o.k}" data-id="${o.id}" ${buyBlocked ? `disabled title="${o.ok === false ? o.bad : `Недостаточно золота: нужно ${price}🪙`}"` : `title="Купить за ${price}🪙"`}>Купить 🪙${price}</button>
           </div>`;
         }).join("")}
       </div>
@@ -471,6 +485,7 @@ function showCity(c) {
     b.onclick = () => {
       if (b.dataset.k === "wonder" && (S.wonders || []).some((w) => w.id === b.dataset.id)) return;
       if (b.dataset.k === "unit" && !unitAvailable(0, b.dataset.id)) return;
+      if (b.dataset.k === "unit" && b.dataset.id === "missionary" && !c.religion) return;
       c.producing = { k: b.dataset.k, id: b.dataset.id };
       save();
       showCity(c);
@@ -640,6 +655,8 @@ function showReligion() {
   const mine = founded.find((r) => r.owner === 0) || null;
   const mineHoly = mine ? cityById(mine.holyCityId) : null;
   const myRelCities = S.cities.filter((c) => c.owner === 0 && c.religion);
+  const cur = S.players[0].stateReligion || null;
+  const present = Object.entries(RELIGIONS).filter(([id]) => S.cities.some((c) => c.owner === 0 && c.religion === id));
   const m = document.createElement("div");
   m.className = "civ-modal";
   m.id = "civ-modal";
@@ -663,12 +680,32 @@ function showReligion() {
           </div>`;
         }).join("")}
       </div>
+      <h3>Государственная религия</h3>
+      ${cur
+        ? `<div class="civ-yields">Объявлена: ${RELIGIONS[cur].icon} ${RELIGIONS[cur].name} — +1 счастье и +1 культура в городах с этой религией, +2 золота от святого города</div>`
+        : `<div class="civ-yields">Не объявлена. Эффекты: +1 счастье и +1 культура в городах с государственной религией, +2 золота от святого города, дипломатия зависит от веры соседей</div>`}
+      <div class="civ-prod-list">
+        ${present.length ? present.map(([id, r]) => `
+          <button class="civ-prod ${cur === id ? "sel" : ""}" data-rel="${id}" ${cur === id ? "disabled" : ""}>
+            <b>${cur === id ? "✓ " : ""}${r.icon} ${r.name}</b>
+            <span>${cur === id ? "государственная религия" : "Сделать государственной"}</span>
+            <span>городов: ${S.cities.filter((c) => c.owner === 0 && c.religion === id).length}</span>
+          </button>`).join("") : `<div class="civ-yields">Ни одна религия не присутствует в ваших городах</div>`}
+      </div>
       <div class="civ-yields">Ваши религиозные города: ${myRelCities.length ? myRelCities.map((c) => `${escapeHtml(c.name)} ${RELIGIONS[c.religion].icon}`).join(", ") : "нет"}</div>
       <button class="btn text" id="civ-close">Закрыть</button>
     </div>
   `;
   rootEl.appendChild(m);
   document.getElementById("civ-close").onclick = closeModal;
+  m.querySelectorAll("[data-rel]").forEach((b) => {
+    b.onclick = () => {
+      declareStateReligion(0, b.dataset.rel);
+      save();
+      showReligion();
+      refresh();
+    };
+  });
 }
 
 function closeModal() {
