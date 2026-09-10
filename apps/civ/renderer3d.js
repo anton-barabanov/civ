@@ -199,7 +199,7 @@ export async function createRenderer3D(container, handlers) {
           kids.push(o);
         });
         tileRoot.add(g);
-        entry = { group: g, kids, dimmed: null, resMesh: null, ocean: t.terrain === 0, x: t.x, y: t.y };
+        entry = { group: g, kids, dimmed: null, resMesh: null, imprMesh: null, imprVal: null, ocean: t.terrain === 0, x: t.x, y: t.y };
         tilesMap.set(idx, entry);
         if (entry.ocean) oceanGroups.push(entry);
       }
@@ -217,6 +217,18 @@ export async function createRenderer3D(container, handlers) {
       } else if (!wantRes && entry.resMesh) {
         entry.group.remove(entry.resMesh);
         entry.resMesh = null;
+      }
+      const iv = t.impr ? (t.impr.left ? t.impr.kind + "!" : t.impr.kind) : null;
+      if (entry.imprVal !== iv) {
+        entry.imprVal = iv;
+        if (entry.imprMesh) {
+          entry.group.remove(entry.imprMesh);
+          entry.imprMesh = null;
+        }
+        if (iv) {
+          entry.imprMesh = models.createImprovementMesh(t.impr.kind, !t.impr.left);
+          entry.group.add(entry.imprMesh);
+        }
       }
     }
     for (const [idx, entry] of tilesMap) {

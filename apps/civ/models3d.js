@@ -31,6 +31,7 @@ const C = {
   gold: "#d4af37",
   sand: "#c9b283",
   bronze: "#5d8a6e",
+  coal: "#2b2b31",
 };
 
 function geo(key, make) {
@@ -48,6 +49,16 @@ function mat(color, side) {
   if (!m) {
     m = new THREE.MeshLambertMaterial({ color, flatShading: true });
     if (side) m.side = side;
+    matCache.set(key, m);
+  }
+  return m;
+}
+
+function tmat(color) {
+  const key = "t:" + color;
+  let m = matCache.get(key);
+  if (!m) {
+    m = new THREE.MeshLambertMaterial({ color, flatShading: true, transparent: true, opacity: 0.55 });
     matCache.set(key, m);
   }
   return m;
@@ -244,6 +255,12 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     const gun = add(group, geo("u:musket", () => new THREE.BoxGeometry(0.52, 0.028, 0.028)), woodDark, 0, 0.42, 0.06);
     gun.rotation.z = 0.5;
     add(gun, geo("u:musketTip", () => new THREE.BoxGeometry(0.15, 0.022, 0.022)), metal, 0.3, 0, 0);
+  } else if (unitType === "worker") {
+    addFigure(group, om, 0.09, 0.33, 0, 0);
+    add(group, geo("u:hatW", () => new THREE.CylinderGeometry(0.1, 0.12, 0.05, 8)), mat(C.sail), 0, 0.42, 0);
+    add(group, geo("u:shovel", () => new THREE.CylinderGeometry(0.012, 0.012, 0.48, 5)), woodDark, 0.17, 0.24, 0.05).rotation.z = -0.25;
+    add(group, geo("u:shovelBlade", () => new THREE.BoxGeometry(0.075, 0.05, 0.022)), metal, 0.225, 0.045, 0.05).rotation.z = -0.25;
+    add(group, geo("u:sack", () => new THREE.SphereGeometry(0.07, 7, 6)), mat(C.sand), -0.15, 0.055, 0.09).scale.set(1, 0.85, 1);
   } else if (unitType === "gp_scientist") {
     addSage(group, om);
     add(group, geo("u:gpScroll", () => new THREE.CylinderGeometry(0.035, 0.035, 0.18, 8)), mat(C.sail), 0, 0.3, 0.13).rotation.x = Math.PI / 2;
@@ -453,6 +470,28 @@ export function createLandResourceMesh(kind) {
     add(group, geo("l:marBase", () => new THREE.CylinderGeometry(0.08, 0.095, 0.04, 8)), mat(C.stone), 0, 0.02, 0);
     add(group, geo("l:marCol", () => new THREE.CylinderGeometry(0.045, 0.052, 0.27, 8)), mat(C.snow), 0, 0.175, 0);
     add(group, geo("l:marCap", () => new THREE.CylinderGeometry(0.068, 0.068, 0.035, 8)), mat(C.stone), 0, 0.325, 0);
+  }
+  return group;
+}
+
+export function createImprovementMesh(kind, done = true) {
+  const group = new THREE.Group();
+  if (kind === "farm") {
+    const furrowGeo = geo("i:furrow", () => new THREE.BoxGeometry(0.66, 0.035, 0.085));
+    const a = done ? mat(C.woodDark) : tmat(C.woodDark);
+    const b = done ? mat(C.trunk) : tmat(C.trunk);
+    const n = done ? 4 : 2;
+    for (let i = 0; i < n; i++) add(group, furrowGeo, i % 2 ? a : b, 0, 0.02, -0.22 + i * 0.145);
+    if (done) add(group, geo("i:haystack", () => new THREE.ConeGeometry(0.075, 0.11, 6)), mat(C.sand), 0.25, 0.055, 0.25);
+  } else {
+    add(group, geo("i:mound", () => new THREE.BoxGeometry(0.34, 0.13, 0.3)), done ? mat(C.stoneDark) : tmat(C.stoneDark), 0, 0.065, 0);
+    if (done) {
+      add(group, geo("i:entry", () => new THREE.BoxGeometry(0.13, 0.11, 0.05)), mat(C.coal), 0, 0.07, 0.15);
+      const postGeo = geo("i:post", () => new THREE.BoxGeometry(0.03, 0.16, 0.03));
+      add(group, postGeo, mat(C.woodDark), -0.09, 0.08, 0.16);
+      add(group, postGeo, mat(C.woodDark), 0.09, 0.08, 0.16);
+      add(group, geo("i:lintel", () => new THREE.BoxGeometry(0.23, 0.035, 0.04)), mat(C.woodDark), 0, 0.17, 0.16);
+    }
   }
   return group;
 }

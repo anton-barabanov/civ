@@ -1,5 +1,5 @@
 import {
-  TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, W, H,
+  TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, W, H,
   key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack,
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
@@ -8,6 +8,7 @@ import {
   RELIGIONS, WONDERS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
+  startImprovement, cancelWork,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -80,6 +81,7 @@ function buildViewModel() {
         x, y,
         terrain: S.map[k],
         res: S.res ? S.res[k] : null,
+        impr: S.impr ? S.impr[k] : null,
         explored: !!S.explored[k],
         visible: !!visible[k],
         owner: S.tileOwner ? S.tileOwner[k] : -1,
@@ -212,6 +214,31 @@ function renderPanel() {
       const tOwner = S.tileOwner ? S.tileOwner[key(sel.x, sel.y)] : -1;
       if (tOwner === -1 || tOwner === 0) body += `<button class="btn primary" id="civ-found">Основать город</button>`;
     }
+    if (sel.type === "worker") {
+      const wk = key(sel.x, sel.y);
+      if (sel.work) {
+        const nm = sel.work.kind === "farm" ? "🌱 Ферма" : "⚒ Шахта";
+        body += `<button class="btn text" disabled>${nm}: работа ${3 - sel.work.left}/3</button>`;
+        body += `<button class="btn text" id="civ-cancelwork">✖ Отменить работу</button>`;
+      } else {
+        const terr = S.map[wk];
+        const onCity = !!cityAt(sel.x, sel.y);
+        const tOwner = S.tileOwner ? S.tileOwner[wk] : -1;
+        const busy = S.impr ? !!S.impr[wk] : false;
+        const reason = (kind) => {
+          if (onCity) return "Под клеткой расположен город";
+          if (tOwner !== 0) return "Улучшения строятся только на своей территории";
+          if (busy) return "Клетка уже улучшена";
+          if (sel.moves <= 0) return "Нет ходов";
+          if (kind === "farm" && terr !== TILE.GRASS && terr !== TILE.PLAINS) return "Ферма строится на лугах или равнине";
+          if (kind === "mine" && terr !== TILE.HILLS) return "Шахта строится на холмах";
+          return "";
+        };
+        const fr = reason("farm"), mr = reason("mine");
+        body += `<button class="btn primary" id="civ-farm" ${fr ? `disabled title="${fr}"` : ""}>🌱 Построить ферму (3 хода)</button>`;
+        body += `<button class="btn primary" id="civ-mine" ${mr ? `disabled title="${mr}"` : ""}>⚒ Построить шахту (3 хода)</button>`;
+      }
+    }
     const ownCity = cityAt(sel.x, sel.y);
     if (ownCity && ownCity.owner === 0) {
       body += `<button class="btn text" id="civ-city">🏛 Открыть город</button>`;
@@ -251,6 +278,21 @@ function renderPanel() {
   if (f) f.onclick = () => {
     const u = unitById(getState().sel);
     if (u) { foundCity(u); save(); refresh(); }
+  };
+  const fbtn = document.getElementById("civ-farm");
+  if (fbtn) fbtn.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u && startImprovement(u.id, "farm").ok) { save(); refresh(); }
+  };
+  const mbtn = document.getElementById("civ-mine");
+  if (mbtn) mbtn.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u && startImprovement(u.id, "mine").ok) { save(); refresh(); }
+  };
+  const cw = document.getElementById("civ-cancelwork");
+  if (cw) cw.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u && cancelWork(u.id).ok) { save(); refresh(); }
   };
   const sk = document.getElementById("civ-skip");
   if (sk) sk.onclick = () => {

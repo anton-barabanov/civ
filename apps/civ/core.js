@@ -12,6 +12,7 @@ const TERRAIN = {
 const UNITS = {
   settler: { name: "Поселенец", letter: "П", icon: "🛖", atk: 0, def: 1, moves: 1, cost: 30, tech: null, upgrade: null },
   scout: { name: "Разведчик", letter: "Р", icon: "🧭", atk: 1, def: 1, moves: 2, cost: 15, tech: null, upgrade: null },
+  worker: { name: "Рабочий", letter: "Т", icon: "👷", atk: 0, def: 1, moves: 1, cost: 25, tech: "pottery", upgrade: null },
   warrior: { name: "Воин", letter: "В", icon: "⚔️", atk: 2, def: 2, moves: 1, cost: 20, tech: null, upgrade: "swordsman" },
   archer: { name: "Лучник", letter: "Л", icon: "🏹", atk: 3, def: 4, moves: 1, cost: 35, tech: "archery", upgrade: "crossbowman" },
   swordsman: { name: "Мечник", letter: "М", icon: "🗡️", atk: 5, def: 4, moves: 1, cost: 45, tech: "iron", res: ["iron"], upgrade: "musketman" },
@@ -453,6 +454,7 @@ function newGame(diff = 1, opponents = 1) {
     map: null,
     res: null,
     waterComp: null,
+    impr: new Array(W * H).fill(null),
     players: NATIONS.slice(0, n + 1).map((nat, i) => ({
       name: nat.name,
       color: nat.color,
@@ -594,6 +596,7 @@ function reachable(u) {
 }
 
 function moveUnit(u, x, y) {
+  if (u.work) { addLog("Рабочий занят"); return; }
   const oc = cityAt(x, y);
   if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner)) return;
   const cargo = isNaval(u) ? unitsAt(u.x, u.y).filter((o) => !isNaval(o)) : [];
@@ -720,6 +723,37 @@ function foundCity(u) {
 
 function cityRadius(c) {
   return Math.min(4, 1 + Math.floor((c.pop - 1) / 3) + Math.floor((c.culture || 0) / 40));
+}
+
+function startImprovement(unitId, kind) {
+  const u = unitById(unitId);
+  if (!u) return { ok: false, reason: "юнит не найден" };
+  if (u.type !== "worker") return { ok: false, reason: "это не рабочий" };
+  if (u.work) return { ok: false, reason: "рабочий уже занят" };
+  if (kind !== "farm" && kind !== "mine") return { ok: false, reason: "неизвестное улучшение" };
+  if (u.moves <= 0) return { ok: false, reason: "нет ходов" };
+  const k = key(u.x, u.y);
+  if (cityAt(u.x, u.y)) return { ok: false, reason: "под городом улучшений нет" };
+  if (!S.tileOwner || S.tileOwner[k] !== u.owner) return { ok: false, reason: "улучшения строятся только на своей территории" };
+  const t = S.map[k];
+  if (kind === "farm" && t !== TILE.GRASS && t !== TILE.PLAINS)
+    return { ok: false, reason: "ферма строится на лугах или равнине" };
+  if (kind === "mine" && t !== TILE.HILLS)
+    return { ok: false, reason: "шахта строится на холмах" };
+  if (S.impr[k]) return { ok: false, reason: "улучшение уже есть" };
+  u.work = { kind, left: 3 };
+  S.impr[k] = { kind, left: 3 };
+  u.moves = 0;
+  return { ok: true };
+}
+
+function cancelWork(unitId) {
+  const u = unitById(unitId);
+  if (!u) return { ok: false, reason: "юнит не найден" };
+  if (!u.work) return { ok: false, reason: "рабочий не занят работой" };
+  S.impr[key(u.x, u.y)] = null;
+  u.work = null;
+  return { ok: true };
 }
 
 function recomputeBorders() {
@@ -877,6 +911,9 @@ function cityYields(c) {
       const r = S.res ? S.res[key(nx, ny)] : null;
       if (r === "fish") f += 2;
       if (r === "whale") { f += 1; p += 1; }
+      const im = S.impr ? S.impr[key(nx, ny)] : null;
+      if (im && !im.left && im.kind === "farm") f += 1;
+      if (im && !im.left && im.kind === "mine") p += 1;
       cand.push([f, p, f * 1.2 + p]);
     }
   cand.sort((a, b) => b[2] - a[2]);
@@ -959,6 +996,29 @@ function wonderCost(c, id) {
   const d = WONDERS[id];
   if (!d) return 0;
   return hasMarble(c) ? Math.floor(d.cost * 0.75) : d.cost;
+}
+
+function processWork() {
+  for (let i = 0; i < W * H; i++) {
+    const im = S.impr[i];
+    if (!im || !im.left) continue;
+    if (!S.units.some((u) => u.work && key(u.x, u.y) === i)) S.impr[i] = null;
+  }
+  for (const u of S.units) {
+    if (!u.work) continue;
+    const k = key(u.x, u.y);
+    if (S.tileOwner && S.tileOwner[k] !== u.owner) continue;
+    u.work.left--;
+    if (u.work.left <= 0) {
+      S.impr[k] = { kind: u.work.kind };
+      const nm = u.work.kind === "farm" ? "ферма" : "шахта";
+      u.work = null;
+      addLog(u.owner === 0 ? `Построено улучшение: ${nm}` : `${S.players[u.owner].name}: построено улучшение — ${nm}`);
+    } else {
+      S.impr[k] = { kind: u.work.kind, left: u.work.left };
+    }
+  }
+  for (const u of S.units) if (u.work) u.moves = 0;
 }
 
 function processEconomy() {
@@ -1082,6 +1142,7 @@ function processEconomy() {
   for (const u of S.units) u.moves = UNITS[u.type].moves;
   checkFoundReligions();
   spreadReligions();
+  processWork();
 }
 
 function buyForGold(cityId, k, id) {
@@ -1210,6 +1271,8 @@ function aiTurnOne(owner) {
         c.producing = { k: "wonder", id: availWonders[(Math.random() * availWonders.length) | 0] };
       } else if (settlers === 0 && myCities < diff.maxCities && Math.random() < diff.settlerChance) {
         c.producing = { k: "unit", id: "settler" };
+      } else if (myCities >= 2 && myUnits.filter((u) => u.type === "worker").length < myCities && unitAvailable(owner, "worker")) {
+        c.producing = { k: "unit", id: "worker" };
       } else if (c.pop >= 3 && !c.buildings.includes("library") && Math.random() < 0.35) {
         const avail = ["granary", "library", "temple", "amphitheater", "forge", "market"].filter(
           (b) => !c.buildings.includes(b) && (!BUILDINGS[b].tech || p.techs.includes(BUILDINGS[b].tech))
@@ -1266,6 +1329,36 @@ function aiTurnOne(owner) {
         }
         if (u.x === home.x && u.y === home.y) useGreatPerson(u.id);
       }
+      continue;
+    }
+    if (u.type === "worker") {
+      if (u.work) { u.moves = 0; continue; }
+      const comp = landCompOf(u.x, u.y);
+      let best = null, bestPrio = 0, bestD = 0, bestK = -1;
+      for (let i = 0; i < W * H; i++) {
+        if (S.tileOwner[i] !== owner || S.impr[i] || !comp.has(i)) continue;
+        const x = i % W, y = (i / W) | 0;
+        if (cityAt(x, y)) continue;
+        const t = S.map[i];
+        const kind = t === TILE.HILLS ? "mine" : (t === TILE.GRASS || t === TILE.PLAINS) ? "farm" : null;
+        if (!kind) continue;
+        const prio = kind === "mine" ? 2 : 1;
+        const d = dist(u.x, u.y, x, y);
+        if (!best || prio > bestPrio || (prio === bestPrio && (d < bestD || (d === bestD && i < bestK)))) {
+          best = { x, y, kind };
+          bestPrio = prio;
+          bestD = d;
+          bestK = i;
+        }
+      }
+      if (!best) { u.moves = 0; continue; }
+      if (u.x === best.x && u.y === best.y) { startImprovement(u.id, best.kind); continue; }
+      while (u.moves > 0 && (u.x !== best.x || u.y !== best.y)) {
+        const before = u.x + "," + u.y;
+        stepToward(u, best.x, best.y);
+        if (u.x + "," + u.y === before) break;
+      }
+      if (u.x === best.x && u.y === best.y) startImprovement(u.id, best.kind);
       continue;
     }
     if (u.type === "settler") {
@@ -1570,6 +1663,7 @@ function load() {
     if (!S.res) S.res = new Array(W * H).fill(null);
     if (!S.res.some((r) => r === "iron" || r === "horses" || r === "marble")) scatterLandResources(S.map, S.res);
     if (!S.waterComp) S.waterComp = computeWaterComps(S.map);
+    if (!Array.isArray(S.impr)) S.impr = new Array(W * H).fill(null);
     if (!Array.isArray(S.tileOwner)) S.tileOwner = new Array(W * H).fill(-1);
     if (!Array.isArray(S.players) || S.players.length === 0) return false;
     if (!S.relations || typeof S.relations !== "object") {
@@ -1622,7 +1716,7 @@ export {
   cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
-  unitAvailable, resourceConnected, hasMarble, wonderCost,
+  unitAvailable, resourceConnected, hasMarble, wonderCost, startImprovement, cancelWork,
 };
 
 export function debugApi() {
@@ -1692,6 +1786,8 @@ export function debugApi() {
     resourceConnected,
     hasMarble,
     wonderCost,
+    startImprovement,
+    cancelWork,
     getTileOwner: () => Array.from(S.tileOwner),
   };
 }

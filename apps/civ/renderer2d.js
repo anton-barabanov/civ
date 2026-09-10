@@ -48,6 +48,11 @@ export function createRenderer2D(container, handlers) {
       if (t.terrain === TILE.MOUNTAIN) drawGlyph("⛰", t.x, t.y);
       if (t.terrain === TILE.HILLS && !t.res) drawGlyph("⌃", t.x, t.y, 12);
       if (t.res && RESOURCES[t.res]) drawGlyph(RESOURCES[t.res].icon, t.x, t.y);
+      if (t.impr) {
+        ctx.font = "10px sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fillText(t.impr.left ? (t.impr.kind === "farm" ? "🌱" : "⚒") : (t.impr.kind === "farm" ? "🌾" : "◆"), t.x * TS + 2, t.y * TS + 10);
+      }
       if (!t.visible) {
         ctx.fillStyle = "rgba(0,0,0,0.45)";
         ctx.fillRect(t.x * TS, t.y * TS, TS - 1, TS - 1);
