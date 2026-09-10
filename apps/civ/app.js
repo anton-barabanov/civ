@@ -28,7 +28,7 @@ function initialRendererMode() {
     const saved = localStorage.getItem("civ_renderer");
     if (saved === "3d" || saved === "2d") return saved;
   } catch (e) {}
-  return "2d";
+  return "3d";
 }
 
 function persistRenderer(mode) {
