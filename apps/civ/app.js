@@ -4,7 +4,7 @@ import {
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf,
-  RELIGIONS, isHolyCity, cityById,
+  RELIGIONS, WONDERS, isHolyCity, cityById,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -84,7 +84,11 @@ function buildViewModel() {
     }
   const cities = S.cities
     .filter((c) => S.explored[key(c.x, c.y)])
-    .map((c) => ({ id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner, walls: c.buildings.includes("walls"), religion: c.religion || null }));
+    .map((c) => ({
+      id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner,
+      walls: c.buildings.includes("walls"), religion: c.religion || null,
+      wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
+    }));
   const units = S.units
     .filter((u) => (u.owner === 0 || visible[key(u.x, u.y)]) && S.explored[key(u.x, u.y)])
     .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === 0 && u.moves > 0, icon: UNITS[u.type].icon }));
@@ -271,9 +275,19 @@ function showCity(c) {
   const bldOpts = Object.entries(BUILDINGS)
     .filter(([id, d]) => (!d.tech || p.techs.includes(d.tech)) && !c.buildings.includes(id))
     .map(([id, d]) => ({ k: "building", id, name: d.name, cost: d.cost, info: d.desc }));
+  const wonderOpts = Object.entries(WONDERS).map(([id, d]) => {
+    const built = (S.wonders || []).find((w) => w.id === id);
+    const techOk = !d.tech || p.techs.includes(d.tech);
+    return {
+      k: "wonder", id, name: `${d.icon} ${d.name}`, cost: d.cost,
+      info: built ? `${d.desc} · построено: ${S.players[built.owner].name}` :
+        (!techOk ? `${d.desc} · нужна технология: ${TECHS[d.tech].name}` : d.desc),
+      ok: !built && techOk,
+    };
+  });
   const opts = [...unitOpts, ...bldOpts];
   const cur = c.producing
-    ? (c.producing.k === "unit" ? UNITS[c.producing.id] : BUILDINGS[c.producing.id])
+    ? (c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : WONDERS[c.producing.id])
     : null;
   const m = document.createElement("div");
   m.className = "civ-modal";
@@ -297,6 +311,14 @@ function showCity(c) {
             <b>${o.name}</b><span>${o.info}</span><span>🔨 ${o.cost}</span>
           </button>`).join("")}
       </div>
+      <h3>Чудеса света:</h3>
+      <div class="civ-prod-list">
+        ${wonderOpts.map((o) => `
+          <button class="civ-prod ${c.producing && c.producing.id === o.id && c.producing.k === o.k ? "sel" : ""}"
+                  data-k="${o.k}" data-id="${o.id}" ${o.ok ? "" : "disabled"}>
+            <b>${o.name}</b><span>${o.info}</span><span>🔨 ${o.cost}</span>
+          </button>`).join("")}
+      </div>
       <button class="btn text" id="civ-close">Закрыть</button>
     </div>
   `;
@@ -304,6 +326,7 @@ function showCity(c) {
   document.getElementById("civ-close").onclick = closeModal;
   m.querySelectorAll(".civ-prod").forEach((b) => {
     b.onclick = () => {
+      if (b.dataset.k === "wonder" && (S.wonders || []).some((w) => w.id === b.dataset.id)) return;
       c.producing = { k: b.dataset.k, id: b.dataset.id };
       save();
       showCity(c);

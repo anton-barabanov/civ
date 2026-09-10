@@ -25,9 +25,9 @@ const UNITS = {
 };
 
 const DIFFICULTIES = [
-  { key: "easy", title: "Легко", prodMult: 0.75, sciMult: 0.75, aggroTurn: 30, aggroRange: 4, maxCities: 3, settlerChance: 0.6 },
-  { key: "normal", title: "Норма", prodMult: 1.0, sciMult: 1.0, aggroTurn: 15, aggroRange: 6, maxCities: 5, settlerChance: 0.7 },
-  { key: "hard", title: "Сложно", prodMult: 1.4, sciMult: 1.4, aggroTurn: 8, aggroRange: 8, maxCities: 7, settlerChance: 0.8 },
+  { key: "easy", title: "Легко", prodMult: 0.75, sciMult: 0.75, aggroTurn: 30, aggroRange: 4, maxCities: 3, settlerChance: 0.6, wonderChance: 0.08 },
+  { key: "normal", title: "Норма", prodMult: 1.0, sciMult: 1.0, aggroTurn: 15, aggroRange: 6, maxCities: 5, settlerChance: 0.7, wonderChance: 0.15 },
+  { key: "hard", title: "Сложно", prodMult: 1.4, sciMult: 1.4, aggroTurn: 8, aggroRange: 8, maxCities: 7, settlerChance: 0.8, wonderChance: 0.25 },
 ];
 
 const PEACE_WAR_LEN = 10;
@@ -43,6 +43,14 @@ const BUILDINGS = {
   university: { name: "Университет", cost: 80, tech: "education", desc: "+3 науки, +1 культуры", effects: { sciFlat: 3, culture: 1 } },
   barracks: { name: "Казармы", cost: 45, tech: "iron", desc: "+1 атаки юнитам, созданным в городе", effects: { unitAtk: 1 } },
   aqueduct: { name: "Акведук", cost: 60, tech: "engineering", desc: "+3 к пределу населения", effects: { maxPop: 3 } },
+};
+
+const WONDERS = {
+  pyramids: { name: "Пирамиды", icon: "🔺", cost: 160, tech: "masonry", desc: "+2 производства во всех городах", effects: { prodFlat: 2 } },
+  greatlibrary: { name: "Великая библиотека", icon: "📚", cost: 180, tech: "literature", desc: "+50% науки во всех городах", effects: { sciMult: 1.5 } },
+  colossus: { name: "Колосс", icon: "🗿", cost: 160, tech: "currency", desc: "Удваивает бонус морской торговли во всех городах", effects: { tradeMult: 2 } },
+  greatwall: { name: "Великая стена", icon: "🧱", cost: 150, tech: "construction", desc: "+50% защиты всех городов", effects: { defMult: 1.5 } },
+  oraclew: { name: "Оракул", icon: "✨", cost: 130, tech: "mysticism", desc: "Бесплатная технология при завершении", effects: { freeTech: 1 } },
 };
 
 const TECHS = {
@@ -408,6 +416,7 @@ function newGame(diff = 1, opponents = 1) {
     sel: null,
     relations: {},
     religions: [],
+    wonders: [],
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
@@ -540,7 +549,7 @@ function attack(att, x, y) {
   if (!isNaval(def) && t === TILE.OCEAN) D *= 0.5;
   if (city) {
     D *= 1.25;
-    D *= buildingEffects(city).defMult;
+    D *= buildingEffects(city).defMult * playerEffects(city.owner).defMult;
   }
   const r = A / D;
   const p = Math.min(0.95, Math.max(0.05, r / (r + 1)));
@@ -682,6 +691,22 @@ function buildingEffects(c) {
   return e;
 }
 
+function playerEffects(pIdx) {
+  const e = { prodFlat: 0, sciMult: 1, tradeMult: 1, defMult: 1, freeTech: 0 };
+  for (const w of S.wonders) {
+    const c = cityById(w.cityId);
+    if (!c || c.owner !== pIdx) continue;
+    const f = WONDERS[w.id] ? WONDERS[w.id].effects : null;
+    if (!f) continue;
+    e.prodFlat += f.prodFlat || 0;
+    e.sciMult *= f.sciMult || 1;
+    e.tradeMult *= f.tradeMult || 1;
+    e.defMult *= f.defMult || 1;
+    e.freeTech += f.freeTech || 0;
+  }
+  return e;
+}
+
 function isHolyCity(c) {
   return S.religions.some((r) => r.holyCityId === c.id);
 }
@@ -754,12 +779,13 @@ function cityYields(c) {
     prod += cand[i][1];
   }
   const e = buildingEffects(c);
+  const pe = playerEffects(c.owner);
   food += e.foodFlat;
-  prod += e.prodFlat;
+  prod += e.prodFlat + pe.prodFlat;
   let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat + (isHolyCity(c) ? 2 : 0);
-  sci = Math.round(sci * e.sciMult);
-  if (tradeActive(c)) { prod += 2 * e.tradeMult; sci += 1 * e.tradeMult; }
-  return { food, prod, sci, trade: tradeActive(c), tradeProd: tradeActive(c) ? 2 * e.tradeMult : 0, tradeSci: tradeActive(c) ? e.tradeMult : 0 };
+  sci = Math.round(sci * e.sciMult * pe.sciMult);
+  if (tradeActive(c)) { prod += 2 * e.tradeMult * pe.tradeMult; sci += 1 * e.tradeMult * pe.tradeMult; }
+  return { food, prod, sci, trade: tradeActive(c), tradeProd: tradeActive(c) ? 2 * e.tradeMult * pe.tradeMult : 0, tradeSci: tradeActive(c) ? e.tradeMult * pe.tradeMult : 0 };
 }
 
 function techAvailable(p, id) {
@@ -784,30 +810,52 @@ function processEconomy() {
     }
     c.prodStored += y.prod * (p.isHuman ? 1 : diff.prodMult);
     if (c.producing) {
-      const def = c.producing.k === "unit" ? UNITS[c.producing.id] : BUILDINGS[c.producing.id];
+      const def = c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : WONDERS[c.producing.id];
       if (c.prodStored >= def.cost) {
-        c.prodStored -= def.cost;
-        if (c.producing.k === "unit") {
-          const spec = UNITS[c.producing.id];
-          let born = null;
-          if (spec.naval) {
-            const w = adjWater(c.x, c.y);
-            if (w) {
-              born = spawn(c.producing.id, c.owner, w[0], w[1]);
-              if (c.owner === 0) addLog(`${c.name}: построена ${spec.name}`);
-            } else {
-              c.prodStored = 0;
-            }
+        if (c.producing.k === "wonder") {
+          const won = S.wonders.find((w) => w.id === c.producing.id);
+          if (won) {
+            c.prodStored += Math.floor(def.cost / 2);
+            addLog(`${def.name} уже построено ${S.players[won.owner].name} — 50% вложений возвращено производству`);
           } else {
-            born = spawn(c.producing.id, c.owner, c.x, c.y);
-            if (c.owner === 0) addLog(`${c.name}: построен ${spec.name}`);
+            c.prodStored -= def.cost;
+            S.wonders.push({ id: c.producing.id, owner: c.owner, cityId: c.id, turn: S.turn });
+            addLog(`${S.players[c.owner].name}: в городе ${c.name} построено чудо ${def.name}`);
+            if (def.effects.freeTech) {
+              const avail = Object.keys(TECHS).filter((t) => techAvailable(p, t))
+                .sort((a, b) => TECHS[a].cost - TECHS[b].cost);
+              if (avail.length) {
+                p.techs.push(avail[0]);
+                if (p.researching === avail[0]) { p.researching = null; p.progress = 0; }
+                addLog(`Оракул дарует знание: ${TECHS[avail[0]].name}`);
+              }
+            }
           }
-          if (born) born.atkBonus = e.unitAtk;
+          c.producing = null;
         } else {
-          c.buildings.push(c.producing.id);
-          if (c.owner === 0) addLog(`${c.name}: построена ${def.name}`);
+          c.prodStored -= def.cost;
+          if (c.producing.k === "unit") {
+            const spec = UNITS[c.producing.id];
+            let born = null;
+            if (spec.naval) {
+              const w = adjWater(c.x, c.y);
+              if (w) {
+                born = spawn(c.producing.id, c.owner, w[0], w[1]);
+                if (c.owner === 0) addLog(`${c.name}: построена ${spec.name}`);
+              } else {
+                c.prodStored = 0;
+              }
+            } else {
+              born = spawn(c.producing.id, c.owner, c.x, c.y);
+              if (c.owner === 0) addLog(`${c.name}: построен ${spec.name}`);
+            }
+            if (born) born.atkBonus = e.unitAtk;
+          } else {
+            c.buildings.push(c.producing.id);
+            if (c.owner === 0) addLog(`${c.name}: построена ${def.name}`);
+          }
+          c.producing = null;
         }
-        c.producing = null;
       }
     }
     if (!p.researching && !p.isHuman) {
@@ -850,7 +898,12 @@ function aiTurnOne(owner) {
       const myCities = S.cities.filter((x) => x.owner === owner).length;
       const bestUnit = () => ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => !UNITS[t].tech || p.techs.includes(UNITS[t].tech));
-      if (settlers === 0 && myCities < diff.maxCities && Math.random() < diff.settlerChance) {
+      const availWonders = Object.keys(WONDERS).filter((id) =>
+        (!WONDERS[id].tech || p.techs.includes(WONDERS[id].tech)) &&
+        !S.wonders.some((w) => w.id === id));
+      if (c.pop >= 4 && availWonders.length && Math.random() < diff.wonderChance) {
+        c.producing = { k: "wonder", id: availWonders[(Math.random() * availWonders.length) | 0] };
+      } else if (settlers === 0 && myCities < diff.maxCities && Math.random() < diff.settlerChance) {
         c.producing = { k: "unit", id: "settler" };
       } else if (c.pop >= 3 && !c.buildings.includes("library") && Math.random() < 0.35) {
         const avail = ["granary", "library", "temple", "forge", "market"].filter(
@@ -1103,6 +1156,7 @@ function load() {
     }
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
     if (!Array.isArray(S.religions)) S.religions = [];
+    if (!Array.isArray(S.wonders)) S.wonders = [];
     for (const c of S.cities) {
       if (!c.religion) c.religion = null;
       if (typeof c.relPressure !== "number") c.relPressure = 0;
@@ -1127,11 +1181,11 @@ export function getState() { return S; }
 export function getVisible() { return visible; }
 
 export {
-  TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, W, H, TS, SAVE_KEY,
+  TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, W, H, TS, SAVE_KEY,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, techAvailable, processEconomy, endTurn, save, load,
-  foundReligion, checkFoundReligions, spreadReligions, isHolyCity,
+  foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy,
 };
 
@@ -1141,6 +1195,7 @@ export function debugApi() {
     get TECHS() { return TECHS; },
     get UNITS() { return UNITS; },
     get BUILDINGS() { return BUILDINGS; },
+    get WONDERS() { return WONDERS; },
     get NATIONS() { return NATIONS; },
     get RELIGIONS() { return RELIGIONS; },
     getNations: () => NATIONS,
@@ -1174,6 +1229,7 @@ export function debugApi() {
     techAvailable,
     cityYields,
     buildingEffects,
+    playerEffects,
     reachable,
     canEnter,
     isNaval,

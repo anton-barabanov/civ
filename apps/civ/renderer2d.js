@@ -1,4 +1,4 @@
-import { TILE, TERRAIN, W, H, TS, RELIGIONS } from "./core.js";
+import { TILE, TERRAIN, W, H, TS, RELIGIONS, WONDERS } from "./core.js";
 
 export function createRenderer2D(container, handlers) {
   const cv = document.createElement("canvas");
@@ -92,6 +92,10 @@ export function createRenderer2D(container, handlers) {
         ctx.fillRect(px + 1, py + 1, 13, 12);
         ctx.font = "9px sans-serif";
         ctx.fillText(rd.icon, px + 3, py + 10);
+      }
+      if (c.wonders && c.wonders.length) {
+        ctx.font = "10px sans-serif";
+        ctx.fillText(WONDERS[c.wonders[0]].icon, px + TS - 13, py + TS - 2);
       }
     }
     const myStack = {};

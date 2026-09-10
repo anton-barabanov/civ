@@ -775,6 +775,107 @@ let relMigErr = null;
 try { api.processEconomy(); api.spreadReligions(); } catch (e) { relMigErr = e; }
 check("religion logic stable after migration", relMigErr === null);
 
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner === 0);
+const wS = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+api.foundCity(wS);
+api.foundCity(api.spawn("settler", 0, wS.x + 2 <= 25 ? wS.x + 2 : wS.x - 2, wS.y));
+for (const c of api.S.cities) { c.pop = 1; c.culture = 0; c.foodStored = 0; c.prodStored = 0; c.buildings = []; c.producing = null; }
+const WT = api.WONDERS;
+check("WONDERS table valid", !!WT && Object.keys(WT).length === 5 &&
+  ["pyramids", "greatlibrary", "colossus", "greatwall", "oraclew"].every((id) =>
+    WT[id] && WT[id].name && WT[id].icon && WT[id].desc && api.TECHS[WT[id].tech]) &&
+  Object.values(WT).every((w) => w.cost >= 130 && w.cost <= 180 && w.effects && Object.keys(w.effects).length > 0));
+
+const wA = api.S.cities[0], wB = api.S.cities[1];
+api.S.players[0].techs.push("masonry");
+const aP0 = api.cityYields(wA).prod, bP0 = api.cityYields(wB).prod, bS0 = api.cityYields(wB).sci;
+wA.producing = { k: "wonder", id: "pyramids" };
+api.processEconomy();
+check("wonder chosen as production and accumulates", wA.producing && wA.producing.k === "wonder" &&
+  wA.producing.id === "pyramids" && wA.prodStored > 0 && api.S.wonders.length === 0);
+
+wA.prodStored = WT.pyramids.cost;
+const wTurn = api.S.turn;
+api.processEconomy();
+check("wonder completion recorded in S.wonders", api.S.wonders.length === 1 &&
+  api.S.wonders[0].id === "pyramids" && api.S.wonders[0].owner === 0 &&
+  api.S.wonders[0].cityId === wA.id && api.S.wonders[0].turn === wTurn);
+check("pyramids +2 prod in all owner cities", api.cityYields(wA).prod === aP0 + 2 && api.cityYields(wB).prod === bP0 + 2);
+
+api.S.players[0].techs.push("literature");
+wA.producing = { k: "wonder", id: "greatlibrary" };
+wA.prodStored = WT.greatlibrary.cost;
+api.processEconomy();
+check("greatlibrary +50% sci in all owner cities", api.cityYields(wB).sci === Math.round(bS0 * 1.5));
+
+api.S.players[1].techs.push("masonry", "construction");
+api.foundCity(api.spawn("settler", 1, wA.x, wA.y + 3 <= 17 ? wA.y + 3 : wA.y - 3));
+const wC = api.S.cities.find((c) => c.owner === 1);
+wC.pop = 1; wC.culture = 0; wC.foodStored = 0; wC.buildings = []; wC.producing = null;
+const cY = api.cityYields(wC).prod;
+wC.producing = { k: "wonder", id: "pyramids" };
+wC.prodStored = 999;
+api.processEconomy();
+check("race lost: 50% compensation, wonder not duplicated", api.S.wonders.filter((w) => w.id === "pyramids").length === 1 &&
+  wC.producing === null && wC.prodStored === 999 + cY + Math.floor(WT.pyramids.cost / 2) &&
+  api.S.log.some((l) => l.includes("уже построено")));
+
+wC.producing = { k: "wonder", id: "greatwall" };
+wC.prodStored = 999;
+api.processEconomy();
+check("greatwall defMult 1.5 via playerEffects", api.playerEffects(1).defMult === 1.5 && api.playerEffects(0).defMult === 1);
+wC.owner = 0;
+check("captured city transfers wonder effect", api.playerEffects(0).defMult === 1.5 && api.playerEffects(1).defMult === 1);
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner === 0);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const orc = api.S.cities[0];
+api.S.players[0].techs.push("mysticism");
+const cheapest0 = Object.keys(api.TECHS).filter((t) => api.techAvailable(api.S.players[0], t))
+  .sort((a, b) => api.TECHS[a].cost - api.TECHS[b].cost)[0];
+orc.producing = { k: "wonder", id: "oraclew" };
+orc.prodStored = 999;
+api.processEconomy();
+check("oracle grants cheapest free tech on completion", api.S.wonders.some((w) => w.id === "oraclew") &&
+  api.S.players[0].techs.includes(cheapest0) && api.S.log.some((l) => l.includes("дарует знание")));
+
+api.newGame(2);
+const awS = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+api.foundCity(awS);
+const awCity = api.S.cities.find((c) => c.owner === 1);
+api.S.players[1].techs.push("masonry", "construction", "currency", "literature", "mysticism");
+awCity.pop = 5;
+awCity.producing = null;
+const origRndW = Math.random;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = origRndW; }
+check("AI starts wonder in strong city", awCity.producing && awCity.producing.k === "wonder" && !!api.WONDERS[awCity.producing.id]);
+awCity.producing = null;
+awCity.pop = 2;
+Math.random = () => 0;
+try { api.aiTurnOne(1); } finally { Math.random = origRndW; }
+check("AI skips wonder in small city", awCity.producing && awCity.producing.k !== "wonder");
+
+check("attack applies wonder defMult", readFileSync("apps/civ/core.js", "utf8").includes("playerEffects(city.owner).defMult"));
+
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const migCity = api.S.cities[0];
+api.S.players[0].techs.push("construction");
+migCity.producing = { k: "wonder", id: "greatwall" };
+api.save();
+check("wonders serialized in save", Array.isArray(JSON.parse(store["civ1_save"]).wonders));
+const rawW = JSON.parse(store["civ1_save"]);
+delete rawW.wonders;
+store["civ1_save"] = JSON.stringify(rawW);
+check("old save without S.wonders migrates", api.load() === true && Array.isArray(api.S.wonders) &&
+  api.S.wonders.length === 0 && api.S.cities[0].producing && api.S.cities[0].producing.k === "wonder");
+let wErr = null;
+try { api.processEconomy(); } catch (e) { wErr = e; }
+check("wonder production stable after migration", wErr === null);
+
 if (!mutation) {
   const expectFail = { a: "FAIL granary +2 food", b: "FAIL processEconomy updates borders after growth" };
   for (const m of ["a", "b"]) {
