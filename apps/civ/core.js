@@ -102,12 +102,19 @@ const TECHS = {
   chemistry: { name: "Химия", cost: 180, req: ["education", "gunpowder"] },
   electricity: { name: "Электричество", cost: 230, req: ["chemistry"] },
   rocketry: { name: "Ракетостроение", cost: 300, req: ["electricity"] },
+  democracy: { name: "Демократия", cost: 160, req: ["banking", "education"] },
 };
 
 const RELIGIONS = {
   oracle: { name: "Учение Оракула", tech: "mysticism", icon: "🔮", color: "#b06bd9" },
   muses: { name: "Культ Муз", tech: "literature", icon: "📜", color: "#3aa88a" },
   sungod: { name: "Вера Ра", tech: "monarchy", icon: "☀", color: "#e8c34a" },
+};
+
+const GOVERNMENTS = {
+  despotism: { name: "Деспотизм", icon: "👑", desc: "Стартовое устройство: без бонусов" },
+  monarchy: { name: "Монархия", icon: "🏰", tech: "monarchy", desc: "+1 счастья всем городам" },
+  democracy: { name: "Демократия", icon: "🗳", tech: "democracy", desc: "+25% науки; усталость от войн ×2" },
 };
 
 const RESOURCES = {
@@ -485,6 +492,9 @@ function newGame(diff = 1, opponents = 1) {
       gpNext: GP_BASE_THRESHOLD,
       gpRotate: 0,
       stateReligion: null,
+      government: "despotism",
+      anarchy: 0,
+      pendingGov: null,
       isHuman: i === 0,
       explored: new Array(W * H).fill(0),
     })),
@@ -892,8 +902,10 @@ function stateReligionBonus(c) {
 }
 
 function cityHappiness(c) {
-  const unhappy = Math.max(0, c.pop - 4) + Object.entries(S.relations).reduce((a, [k, r]) => a + (r.war && k.split(":").map(Number).includes(c.owner) ? Math.floor((S.turn - r.since) / 10) : 0), 0);
-  const happy = 1 + buildingEffects(c).happiness + stateReligionBonus(c);
+  const warWear = Object.entries(S.relations).reduce((a, [k, r]) => a + (r.war && k.split(":").map(Number).includes(c.owner) ? Math.floor((S.turn - r.since) / 10) : 0), 0);
+  const govWar = (S.players[c.owner].government === "democracy" && !S.players[c.owner].anarchy) ? 2 : 1;
+  const unhappy = Math.max(0, c.pop - 4) + warWear * govWar;
+  const happy = 1 + buildingEffects(c).happiness + stateReligionBonus(c) + ((S.players[c.owner].government === "monarchy" && !S.players[c.owner].anarchy) ? 1 : 0);
   return { unhappy, happy, riot: unhappy > happy + 2 };
 }
 
@@ -910,6 +922,9 @@ function playerEffects(pIdx) {
     e.defMult *= f.defMult || 1;
     e.freeTech += f.freeTech || 0;
   }
+  const gov = S.players[pIdx] || {};
+  if (gov.anarchy > 0) e.sciMult *= 0.5;
+  else if (gov.government === "democracy") e.sciMult *= 1.25;
   return e;
 }
 
@@ -990,6 +1005,20 @@ function declareStateReligion(pIdx, relId) {
     return { ok: false, reason: "религии нет в городах игрока" };
   p.stateReligion = relId;
   addLog(`${p.name}: государственная религия — ${RELIGIONS[relId].name}`);
+  return { ok: true };
+}
+
+function startRevolution(pIdx, govId) {
+  const p = S.players[pIdx];
+  if (!p || !playerAlive(pIdx)) return { ok: false, reason: "игрок не найден" };
+  const g = GOVERNMENTS[govId];
+  if (!g) return { ok: false, reason: "неизвестное госустройство" };
+  if (p.government === govId) return { ok: false, reason: "это госустройство уже действует" };
+  if (g.tech && !p.techs.includes(g.tech)) return { ok: false, reason: `нужна технология: ${TECHS[g.tech].name}` };
+  if (p.anarchy > 0) return { ok: false, reason: "идёт анархия" };
+  p.anarchy = 3;
+  p.pendingGov = govId;
+  addLog(`${p.name}: революция! ${g.name} через 3 хода`);
   return { ok: true };
 }
 
@@ -1447,6 +1476,15 @@ function aiTurn() {
 function aiTurnOne(owner) {
   const p = S.players[owner];
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  if (p.anarchy === 0) {
+    const govCities = S.cities.filter((c) => c.owner === owner);
+    if (p.government !== "monarchy" && p.government !== "democracy" && p.techs.includes("monarchy") &&
+      govCities.length >= 2 && govCities.some((c) => { const h = cityHappiness(c); return h.unhappy > h.happy; }) &&
+      Math.random() < 0.5) startRevolution(owner, "monarchy");
+    else if (p.government !== "democracy" && p.techs.includes("democracy") && S.turn >= 60 &&
+      !S.players.some((_, j) => j !== owner && atWar(owner, j)) && Math.random() < 0.3)
+      startRevolution(owner, "democracy");
+  }
   if (!p.stateReligion) {
     const mine = S.cities.filter((c) => c.owner === owner);
     let bestRel = null, bestN = 0;
@@ -2164,6 +2202,20 @@ function processElections() {
   if (won) S.over = { winner: builder, type: "diplomacy" };
 }
 
+function processGovernments() {
+  for (const p of S.players) {
+    if (!p.anarchy) continue;
+    p.anarchy--;
+    if (p.anarchy > 0) continue;
+    const govId = p.pendingGov;
+    p.pendingGov = null;
+    if (govId && GOVERNMENTS[govId]) {
+      p.government = govId;
+      addLog(`${p.name}: вступает в силу — ${GOVERNMENTS[govId].name}`);
+    }
+  }
+}
+
 function checkVictory() {
   if (S.over) return;
   if (!playerAlive(0)) {
@@ -2205,6 +2257,7 @@ function endTurn() {
   aiTurn();
   processEconomy();
   processElections();
+  processGovernments();
   S.turn++;
   computeVision();
   checkVictory();
@@ -2276,6 +2329,9 @@ function load() {
       if (typeof p.gpNext !== "number") p.gpNext = GP_BASE_THRESHOLD;
       if (typeof p.gpRotate !== "number") p.gpRotate = 0;
       if (!("stateReligion" in p)) p.stateReligion = null;
+      if (typeof p.government !== "string" || !GOVERNMENTS[p.government]) p.government = "despotism";
+      if (typeof p.anarchy !== "number") p.anarchy = 0;
+      if (!("pendingGov" in p)) p.pendingGov = null;
       if (!Array.isArray(p.cityNames)) {
         const nat = NATIONS.find((n) => n.name === p.name);
         const taken = new Set(S.cities.filter((c) => c.owner === i).map((c) => c.name));
@@ -2292,13 +2348,13 @@ export function getState() { return S; }
 export function getVisible() { return visible; }
 
 export {
-  TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, SS_PARTS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, RESOURCES, W, H, TS, SAVE_KEY,
+  TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, SS_PARTS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, GOVERNMENTS, RESOURCES, W, H, TS, SAVE_KEY,
   CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD, GREAT_PEOPLE, GP_ORDER,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
-  spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections,
+  spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections, processGovernments, startRevolution,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
   offerDeal, dealValue, mapValue, demandTribute, processDeals,
   unitAvailable, resourceConnected, resourceOwned, hasMarble, wonderCost, startImprovement, cancelWork,
@@ -2314,6 +2370,7 @@ export function debugApi() {
     get SS_PARTS() { return SS_PARTS; },
     get NATIONS() { return NATIONS; },
     get RELIGIONS() { return RELIGIONS; },
+    get GOVERNMENTS() { return GOVERNMENTS; },
     get RESOURCES() { return RESOURCES; },
     get GREAT_PEOPLE() { return GREAT_PEOPLE; },
     get GP_ORDER() { return GP_ORDER; },
@@ -2369,6 +2426,8 @@ export function debugApi() {
     useGreatPerson,
     spreadFaith,
     declareStateReligion,
+    startRevolution,
+    processGovernments,
     relWarFactor,
     cityYields,
     cityHappiness,

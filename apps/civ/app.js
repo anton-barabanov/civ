@@ -5,10 +5,10 @@ import {
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf, offerDeal, mapValue, demandTribute, resourceOwned,
-  RELIGIONS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
+  RELIGIONS, GOVERNMENTS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
-  startImprovement, cancelWork, spreadFaith, declareStateReligion, councilSupport,
+  startImprovement, cancelWork, spreadFaith, declareStateReligion, startRevolution, councilSupport,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -157,6 +157,7 @@ function renderTopbar() {
     <div class="topbar-row topbar-actions">
       <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
       <button class="civ-tech-btn" id="civ-religion">Религия</button>
+      <button class="civ-tech-btn" id="civ-gov">${p.anarchy > 0 ? `<span class="civ-warn">⚖ Анархия: ${p.anarchy}</span>` : `⚖ ${GOVERNMENTS[p.government].name}`}</button>
       <button class="civ-tech-btn" id="civ-tech">Технологии</button>
       <span class="topbar-spacer"></span>
       <button class="civ-end" id="civ-end">Конец хода</button>
@@ -168,6 +169,7 @@ function renderTopbar() {
   };
   document.getElementById("civ-diplo").onclick = showDiplo;
   document.getElementById("civ-religion").onclick = showReligion;
+  document.getElementById("civ-gov").onclick = showGov;
   document.getElementById("civ-tech").onclick = showTech;
   document.getElementById("civ-end").onclick = () => { endTurn(); refresh(); };
 }
@@ -915,6 +917,51 @@ function showReligion() {
       declareStateReligion(0, b.dataset.rel);
       save();
       showReligion();
+      refresh();
+    };
+  });
+}
+
+function showGov() {
+  closeModal();
+  const S = getState();
+  const p = S.players[0];
+  const cur = GOVERNMENTS[p.government] || GOVERNMENTS.despotism;
+  const inAnarchy = p.anarchy > 0;
+  const pending = inAnarchy && p.pendingGov && GOVERNMENTS[p.pendingGov] ? GOVERNMENTS[p.pendingGov] : null;
+  const m = document.createElement("div");
+  m.className = "civ-modal";
+  m.id = "civ-modal";
+  m.innerHTML = `
+    <div class="civ-dialog civ-techs">
+      <h2>⚖ Госустройство</h2>
+      ${inAnarchy
+        ? `<div class="civ-warn">Анархия: осталось ${p.anarchy} ход(а)${pending ? ` — готовится ${pending.icon} ${pending.name}` : ""}</div>`
+        : `<div class="civ-yields">Текущее устройство: ${cur.icon} ${cur.name} — ${cur.desc}</div>`}
+      <div class="civ-prod-list">
+        ${Object.entries(GOVERNMENTS).map(([id, g]) => {
+          const active = p.government === id && !inAnarchy;
+          let why = "";
+          if (active) why = "уже действует";
+          else if (inAnarchy) why = "идёт анархия";
+          else if (g.tech && !p.techs.includes(g.tech)) why = `нужна технология: ${TECHS[g.tech].name}`;
+          return `<div class="civ-prod ${active ? "sel" : ""}">
+            <b>${g.icon} ${g.name}</b>
+            <span>${g.desc}${g.tech ? ` · технология: ${TECHS[g.tech].name}` : " · доступно сразу"}</span>
+            <span><button class="btn text" data-gov="${id}" ${why ? `disabled title="${why}"` : ""}>Революция → ${g.name} (3 хода анархии)</button></span>
+          </div>`;
+        }).join("")}
+      </div>
+      <button class="btn text" id="civ-close">Закрыть</button>
+    </div>
+  `;
+  rootEl.appendChild(m);
+  document.getElementById("civ-close").onclick = closeModal;
+  m.querySelectorAll("[data-gov]").forEach((b) => {
+    b.onclick = () => {
+      startRevolution(0, b.dataset.gov);
+      save();
+      showGov();
       refresh();
     };
   });

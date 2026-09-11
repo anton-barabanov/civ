@@ -2,6 +2,15 @@ export async function createRenderer3D(container, handlers) {
   const THREE = await import("./vendor/three.module.js");
   const models = await import("./models3d.js");
 
+  const FX_DYING = 0.4;
+  const FX_RING = 0.45;
+  const FX_CLASH = 0.3;
+  const FX_KICK = 0.25;
+  const FX_KICK_DIST = 0.06;
+  const FX_MAX = 5;
+  const effects = [];
+  const dying = [];
+
   let destroyed = false;
   let rafId = 0;
   let mapW = 26;
@@ -279,7 +288,28 @@ export async function createRenderer3D(container, handlers) {
   const fxRoot = new THREE.Group();
   overlayRoot.add(fxRoot);
 
+  const fxRingGeo = ownGeo(new THREE.RingGeometry(0.8, 1, 32));
+  const fxMatBase = ownMat(new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
+
+  function spawnRing(x, z, color, dur) {
+    while (effects.length >= FX_MAX) {
+      const old = effects.shift();
+      overlayRoot.remove(old.mesh);
+      old.mat.dispose();
+    }
+    const mat = fxMatBase.clone();
+    mat.color.set(color);
+    const mesh = new THREE.Mesh(fxRingGeo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, 0.06, z);
+    mesh.scale.setScalar(0.2);
+    overlayRoot.add(mesh);
+    effects.push({ mesh, mat, t: 0, dur });
+  }
+
   function syncEntities(vm) {
+    const prevUnits = new Map();
+    for (const [id, e] of unitHolders) prevUnits.set(id, { x: e.tx, y: e.ty, owner: e.owner });
     const seenU = new Set();
     const per = new Map();
     for (const u of vm.units) {
@@ -292,7 +322,7 @@ export async function createRenderer3D(container, handlers) {
         ring.visible = false;
         holder.add(ring);
         overlayRoot.add(holder);
-        e = { holder, mesh: null, ring, type: null, owner: -1, lastX: NaN, lastZ: NaN, baseY: 0, animT: 1, spawnT: 0 };
+        e = { holder, mesh: null, ring, type: null, owner: -1, lastX: NaN, lastZ: NaN, baseY: 0, animT: 1, spawnT: 0, tx: NaN, ty: NaN, kick: null };
         unitHolders.set(u.id, e);
       }
       if (e.type !== u.type || e.owner !== u.owner) {
@@ -315,14 +345,43 @@ export async function createRenderer3D(container, handlers) {
         e.animT = 0;
       }
       e.baseY = water ? -0.03 : 0;
+      e.tx = u.x;
+      e.ty = u.y;
       e.holder.position.set(px, e.baseY, pz);
       e.ring.position.y = water ? 0.06 : 0.012;
       e.ring.visible = u.owner === 0 && u.movesLeft > 0;
     }
     for (const [id, e] of unitHolders) {
       if (seenU.has(id)) continue;
-      overlayRoot.remove(e.holder);
       unitHolders.delete(id);
+      const p = prevUnits.get(id);
+      const tile = p ? vm.tiles[p.y * vm.W + p.x] : null;
+      const pl = tile && tile.visible && vm.players[p.owner] ? vm.players[p.owner] : null;
+      if (!pl) {
+        overlayRoot.remove(e.holder);
+        continue;
+      }
+      spawnRing(e.lastX, e.lastZ, pl.color, shadowsOn ? FX_RING : FX_CLASH);
+      if (shadowsOn) dying.push({ entry: e, t: 0, s0: e.holder.scale.x });
+      else overlayRoot.remove(e.holder);
+    }
+    for (const u of vm.units) {
+      if (prevUnits.has(u.id)) continue;
+      for (const v of vm.units) {
+        if (v.owner === u.owner) continue;
+        if (Math.max(Math.abs(v.x - u.x), Math.abs(v.y - u.y)) > 1) continue;
+        const vt = vm.tiles[v.y * vm.W + v.x];
+        if (!vt || !vt.visible) continue;
+        spawnRing(tileX(u.x, vm), tileZ(u.y, vm), 0xffffff, FX_CLASH);
+        if (shadowsOn) {
+          const ev = unitHolders.get(v.id);
+          const dx = v.x - u.x;
+          const dz = v.y - u.y;
+          const len = Math.hypot(dx, dz);
+          if (ev && len > 1e-6) ev.kick = { dx: dx / len, dz: dz / len, t: 0 };
+        }
+        break;
+      }
     }
     const seenC = new Set();
     for (const c of vm.cities) {
@@ -489,6 +548,42 @@ export async function createRenderer3D(container, handlers) {
       }
       if (e.flag) e.flag.rotation.y = 0.15 * Math.sin(t * 2 + e.flagPhase);
     }
+    for (const e of unitHolders.values()) {
+      if (!e.kick) continue;
+      e.kick.t += dt;
+      if (e.kick.t >= FX_KICK) {
+        e.kick = null;
+        e.holder.position.x = e.lastX;
+        e.holder.position.z = e.lastZ;
+      } else {
+        const a = FX_KICK_DIST * Math.sin(Math.PI * e.kick.t / FX_KICK);
+        e.holder.position.x = e.lastX + e.kick.dx * a;
+        e.holder.position.z = e.lastZ + e.kick.dz * a;
+      }
+    }
+    for (let i = dying.length - 1; i >= 0; i--) {
+      const d = dying[i];
+      d.t += dt;
+      const p = Math.min(d.t / FX_DYING, 1);
+      d.entry.holder.scale.setScalar(d.s0 + (0.05 - d.s0) * p);
+      d.entry.holder.position.y = d.entry.baseY - 0.25 * p;
+      if (p >= 1) {
+        overlayRoot.remove(d.entry.holder);
+        dying.splice(i, 1);
+      }
+    }
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const f = effects[i];
+      f.t += dt;
+      const p = Math.min(f.t / f.dur, 1);
+      f.mesh.scale.setScalar(0.2 + 1.2 * p);
+      f.mat.opacity = 0.7 * (1 - p);
+      if (p >= 1) {
+        overlayRoot.remove(f.mesh);
+        f.mat.dispose();
+        effects.splice(i, 1);
+      }
+    }
     dtBuf[dtIdx] = dtMs;
     dtIdx = (dtIdx + 1) % dtBuf.length;
     if (dtCnt < dtBuf.length) dtCnt++;
@@ -522,6 +617,13 @@ export async function createRenderer3D(container, handlers) {
     canvas.removeEventListener("contextmenu", onContext);
     if (ro) ro.disconnect();
     else if (typeof window !== "undefined") window.removeEventListener("resize", onWinResize);
+    for (const f of effects) {
+      overlayRoot.remove(f.mesh);
+      f.mat.dispose();
+    }
+    effects.length = 0;
+    for (const d of dying) overlayRoot.remove(d.entry.holder);
+    dying.length = 0;
     for (const g of own.geos) g.dispose();
     for (const m of own.mats) m.dispose();
     for (const m of dimCache.values()) m.dispose();
