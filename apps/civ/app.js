@@ -4,7 +4,7 @@ import {
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
-  relKey, atWar, declareWar, offerPeace, strengthOf, offerDeal, demandTribute, resourceOwned,
+  relKey, atWar, declareWar, offerPeace, strengthOf, offerDeal, mapValue, demandTribute, resourceOwned,
   RELIGIONS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
@@ -44,6 +44,7 @@ async function swapRenderer() {
 function buildViewModel() {
   const S = getState();
   const visible = getVisible();
+  const explored = S.players[0].explored;
   const sel = S.sel ? unitById(S.sel) : null;
   const reach = sel && sel.owner === 0
     ? [...reachable(sel).keys()].map((k) => ({ x: k % W, y: Math.floor(k / W) }))
@@ -57,13 +58,13 @@ function buildViewModel() {
         terrain: S.map[k],
         res: S.res ? S.res[k] : null,
         impr: S.impr ? S.impr[k] : null,
-        explored: !!S.explored[k],
+        explored: !!explored[k],
         visible: !!visible[k],
         owner: S.tileOwner ? S.tileOwner[k] : -1,
       });
     }
   const cities = S.cities
-    .filter((c) => S.explored[key(c.x, c.y)])
+    .filter((c) => explored[key(c.x, c.y)])
     .map((c) => ({
       id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner,
       walls: c.buildings.includes("walls"), religion: c.religion || null,
@@ -72,7 +73,7 @@ function buildViewModel() {
       wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
     }));
   const units = S.units
-    .filter((u) => (u.owner === 0 || visible[key(u.x, u.y)]) && S.explored[key(u.x, u.y)])
+    .filter((u) => (u.owner === 0 || visible[key(u.x, u.y)]) && explored[key(u.x, u.y)])
     .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === 0 && u.moves > 0, icon: UNITS[u.type].icon }));
   return {
     W,
@@ -89,7 +90,7 @@ function buildViewModel() {
 function onTileClick(x, y) {
   const S = getState();
   if (S.over) { refresh(); return; }
-  if (!inMap(x, y) || !S.explored[key(x, y)]) return;
+  if (!inMap(x, y) || !S.players[0].explored[key(x, y)]) return;
   const sel = S.sel ? unitById(S.sel) : null;
   if (sel && sel.owner === 0) {
     if (sel.x === x && sel.y === y) { S.sel = null; refresh(); return; }
@@ -577,7 +578,7 @@ function showTech() {
   });
 }
 
-let diploTrade = { open: null, giveTech: null, wantTech: null, giveGold: 0, wantGold: 0, giveRes: [], wantRes: [], status: "" };
+let diploTrade = { open: null, giveTech: null, wantTech: null, giveGold: 0, wantGold: 0, giveRes: [], wantRes: [], giveMap: false, wantMap: false, status: "" };
 
 function toggleArr(arr, v) { return arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]; }
 
@@ -587,6 +588,16 @@ function showDiplo() {
   const me = S.players[0];
   const dt = diploTrade;
   const pt = S.pendingTribute && S.players[S.pendingTribute.ai] ? S.pendingTribute : null;
+  const pm = S.pendingMapOffer && S.players[S.pendingMapOffer.ai] ? S.pendingMapOffer : null;
+  const pmCard = pm ? `
+      <div class="civ-prod">
+        <b>🗺 ${escapeHtml(S.players[pm.ai].name)} предлагают купить их карту</b>
+        <span>${pm.cells} клеток за ${pm.price}🪙</span>
+        <span>
+          <button class="btn text" id="civ-pm-buy" ${me.gold >= pm.price ? "" : `disabled title="Недостаточно золота: нужно ${pm.price}🪙"`}>Принять</button>
+          <button class="btn text" id="civ-pm-no">Отказать</button>
+        </span>
+      </div>` : "";
   const ptCard = pt ? `
       <div class="civ-prod">
         <b>⚠ ${escapeHtml(S.players[pt.ai].name)} требуют дань</b>
@@ -603,6 +614,7 @@ function showDiplo() {
     <div class="civ-dialog civ-techs">
       <h2>🤝 Дипломатия</h2>
       ${ptCard}
+      ${pmCard}
       <div class="civ-prod-list">
         ${S.players.slice(1).map((p, idx) => {
           const i = idx + 1;
@@ -622,12 +634,13 @@ function showDiplo() {
           if (tin) summaryBits.push(`Получаете дань ${tin.amount}🪙/ход (ост. ${tin.turnsLeft})`);
           if (tout) summaryBits.push(`Платите дань ${tout.amount}🪙/ход (ост. ${tout.turnsLeft})`);
           if (pairDeals.length) summaryBits.push(`Ресурсы по сделке: ${pairDeals.map((d) => `${RESOURCES[d.res].icon} ${RESOURCES[d.res].name} (ост. ${d.left})`).join(", ")}`);
-          const hasSel = !!(dt.giveTech || dt.wantTech || dt.giveGold || dt.wantGold || dt.giveRes.length || dt.wantRes.length);
+          const hasSel = !!(dt.giveTech || dt.wantTech || dt.giveGold || dt.wantGold || dt.giveRes.length || dt.wantRes.length || dt.giveMap || dt.wantMap);
           const goldBtns = (cur, who, treasury) => [25, 50, 100]
             .filter((g) => g < treasury)
             .map((g) => `<button class="civ-prod ${cur === g ? "sel" : ""}" data-${who}-gold="${g}"><b>${g}🪙</b></button>`).join("") +
             (treasury > 0 ? `<button class="civ-prod ${cur === treasury ? "sel" : ""}" data-${who}-gold="${treasury}"><b>всё ${treasury}🪙</b></button>` : "");
           const resBtns = (cur, who, list) => list.map((r) => `<button class="civ-prod ${cur.includes(r) ? "sel" : ""}" data-${who}-res="${r}"><b>${RESOURCES[r].icon} ${RESOURCES[r].name}</b><span>ресурс</span></button>`).join("");
+          const mapBtn = (cur, who, n) => `<button class="civ-prod ${cur ? "sel" : ""}" data-${who}-map="1" ${n === 0 ? `disabled title="нечего открывать"` : ""}><b>🗺 Карта (${n} клеток)</b><span>разведанные земли</span></button>`;
           const tributeOk = !cooldown && strengthOf(i) < 0.6 * strengthOf(0);
           const tributeTitle = cooldown
             ? `Дань доступна через ${cd} ход.`
@@ -654,6 +667,7 @@ function showDiplo() {
                   ${mine.length ? mine.map((t) => `<button class="civ-prod ${dt.giveTech === t ? "sel" : ""}" data-give-tech="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий</span>"}
                   ${goldBtns(dt.giveGold, "give", me.gold)}
                   ${myRes.length ? resBtns(dt.giveRes, "give", myRes) : ""}
+                  ${mapBtn(dt.giveMap, "give", mapValue(0, i))}
                 </div>
               </div>
               <div style="flex:1;min-width:180px"><b>Прошу:</b>
@@ -661,6 +675,7 @@ function showDiplo() {
                   ${theirs.length ? theirs.map((t) => `<button class="civ-prod ${dt.wantTech === t ? "sel" : ""}" data-want-tech="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий</span>"}
                   ${goldBtns(dt.wantGold, "want", p.gold)}
                   ${theirRes.length ? resBtns(dt.wantRes, "want", theirRes) : ""}
+                  ${mapBtn(dt.wantMap, "want", mapValue(i, 0))}
                 </div>
               </div>
             </div>
@@ -702,6 +717,30 @@ function showDiplo() {
     refresh();
     showDiplo();
   };
+  const pmBuy = document.getElementById("civ-pm-buy");
+  if (pmBuy) pmBuy.onclick = () => {
+    const st = getState();
+    const pd = st.pendingMapOffer;
+    if (!pd) return;
+    const meP = st.players[0], aiP = st.players[pd.ai];
+    if (meP.gold < pd.price) return;
+    meP.gold -= pd.price;
+    aiP.gold += pd.price;
+    let n = 0;
+    for (let k = 0; k < aiP.explored.length; k++)
+      if (aiP.explored[k] === 1 && !meP.explored[k]) { meP.explored[k] = 1; n++; }
+    st.pendingMapOffer = null;
+    save();
+    refresh();
+    showDiplo();
+  };
+  const pmNo = document.getElementById("civ-pm-no");
+  if (pmNo) pmNo.onclick = () => {
+    const st = getState();
+    st.pendingMapOffer = null;
+    save();
+    showDiplo();
+  };
   m.querySelectorAll("[data-war]").forEach((b) => {
     b.onclick = () => {
       const i = Number(b.dataset.war);
@@ -723,7 +762,7 @@ function showDiplo() {
   m.querySelectorAll("[data-trade]").forEach((b) => {
     b.onclick = () => {
       const i = Number(b.dataset.trade);
-      diploTrade = { open: diploTrade.open === i ? null : i, giveTech: null, wantTech: null, giveGold: 0, wantGold: 0, giveRes: [], wantRes: [], status: "" };
+      diploTrade = { open: diploTrade.open === i ? null : i, giveTech: null, wantTech: null, giveGold: 0, wantGold: 0, giveRes: [], wantRes: [], giveMap: false, wantMap: false, status: "" };
       showDiplo();
     };
   });
@@ -759,6 +798,18 @@ function showDiplo() {
       showDiplo();
     };
   });
+  m.querySelectorAll("[data-give-map]").forEach((b) => {
+    b.onclick = () => {
+      diploTrade.giveMap = !diploTrade.giveMap;
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-want-map]").forEach((b) => {
+    b.onclick = () => {
+      diploTrade.wantMap = !diploTrade.wantMap;
+      showDiplo();
+    };
+  });
   m.querySelectorAll("[data-want-res]").forEach((b) => {
     b.onclick = () => {
       diploTrade.wantRes = toggleArr(diploTrade.wantRes, b.dataset.wantRes);
@@ -772,10 +823,12 @@ function showDiplo() {
       if (diploTrade.giveTech) give.techs = [diploTrade.giveTech];
       if (diploTrade.giveGold > 0) give.gold = diploTrade.giveGold;
       if (diploTrade.giveRes.length) give.res = [...diploTrade.giveRes];
+      if (diploTrade.giveMap) give.map = true;
       const get = {};
       if (diploTrade.wantTech) get.techs = [diploTrade.wantTech];
       if (diploTrade.wantGold > 0) get.gold = diploTrade.wantGold;
       if (diploTrade.wantRes.length) get.res = [...diploTrade.wantRes];
+      if (diploTrade.wantMap) get.map = true;
       const r = offerDeal(0, i, { give, get });
       diploTrade.status = r.ok ? "Сделка состоялась" : `Отказ: ${r.reason}`;
       if (r.ok) {
@@ -785,6 +838,8 @@ function showDiplo() {
         diploTrade.wantGold = 0;
         diploTrade.giveRes = [];
         diploTrade.wantRes = [];
+        diploTrade.giveMap = false;
+        diploTrade.wantMap = false;
         save();
         refresh();
       }

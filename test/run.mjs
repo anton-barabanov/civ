@@ -120,7 +120,7 @@ const compOf = (x, y) => landComps.findIndex((c) => c.cells.includes(y * 26 + x)
 check("starts on different continents", compOf(start0.x, start0.y) !== compOf(start1.x, start1.y));
 
 check("4 starting units", api.S.units.length === 4);
-check("exploration started", api.S.explored.some((e) => e === 1));
+check("exploration started", api.S.players[0].explored.some((e) => e === 1));
 check("no cities yet", api.S.cities.length === 0);
 
 {

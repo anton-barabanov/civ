@@ -149,6 +149,7 @@ const SAVE_KEY = "civ1_save";
 
 let S = null;
 let visible = null;
+const exploredOf = (i) => S.players[i].explored;
 
 const key = (x, y) => y * W + x;
 const inMap = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
@@ -485,10 +486,10 @@ function newGame(diff = 1, opponents = 1) {
       gpRotate: 0,
       stateReligion: null,
       isHuman: i === 0,
+      explored: new Array(W * H).fill(0),
     })),
     units: [],
     cities: [],
-    explored: new Array(W * H).fill(0),
     tileOwner: new Array(W * H).fill(-1),
     log: ["Игра началась. Основайте город поселенцем."],
     over: null,
@@ -501,6 +502,7 @@ function newGame(diff = 1, opponents = 1) {
     resDeals: [],
     tributes: {},
     pendingTribute: null,
+    pendingMapOffer: null,
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
@@ -558,34 +560,30 @@ function upgradeUnit(u) {
 
 function computeVision() {
   visible = new Array(W * H).fill(0);
-  for (const u of S.units) {
-    if (u.owner !== 0) continue;
-    for (let dy = -2; dy <= 2; dy++)
-      for (let dx = -2; dx <= 2; dx++)
-        if (inMap(u.x + dx, u.y + dy)) {
-          visible[key(u.x + dx, u.y + dy)] = 1;
-          S.explored[key(u.x + dx, u.y + dy)] = 1;
-        }
-  }
-  for (const c of S.cities) {
-    if (c.owner !== 0) continue;
-    for (let dy = -2; dy <= 2; dy++)
-      for (let dx = -2; dx <= 2; dx++)
-        if (inMap(c.x + dx, c.y + dy)) {
-          visible[key(c.x + dx, c.y + dy)] = 1;
-          S.explored[key(c.x + dx, c.y + dy)] = 1;
-        }
-  }
+  const mark = (cx, cy, owner, r) => {
+    const ex = owner === 0 ? visible : exploredOf(owner);
+    const y0 = Math.max(0, cy - r), y1 = Math.min(H - 1, cy + r);
+    const x0 = Math.max(0, cx - r), x1 = Math.min(W - 1, cx + r);
+    if (owner === 0) {
+      const ex0 = exploredOf(0);
+      for (let y = y0; y <= y1; y++) {
+        const base = y * W;
+        for (let x = x0; x <= x1; x++) { ex[base + x] = 1; ex0[base + x] = 1; }
+      }
+      return;
+    }
+    for (let y = y0; y <= y1; y++) {
+      const base = y * W;
+      for (let x = x0; x <= x1; x++) ex[base + x] = 1;
+    }
+  };
+  for (const u of S.units) mark(u.x, u.y, u.owner, 2);
+  for (const c of S.cities) mark(c.x, c.y, c.owner, 2);
   if (S.tileOwner) {
     for (let i = 0; i < W * H; i++) {
-      if (S.tileOwner[i] !== 0) continue;
-      const x = i % W, y = (i / W) | 0;
-      for (let dy = -1; dy <= 1; dy++)
-        for (let dx = -1; dx <= 1; dx++)
-          if (inMap(x + dx, y + dy)) {
-            visible[key(x + dx, y + dy)] = 1;
-            S.explored[key(x + dx, y + dy)] = 1;
-          }
+      const o = S.tileOwner[i];
+      if (o === -1 || !S.players[o]) continue;
+      mark(i % W, (i / W) | 0, o, 1);
     }
   }
 }
@@ -1840,6 +1838,8 @@ function declareWar(i, j) {
     S.pendingTribute = null;
     purged = true;
   }
+  if (S.pendingMapOffer && (S.pendingMapOffer.ai === i || S.pendingMapOffer.ai === j))
+    S.pendingMapOffer = null;
   if (purged) addLog(`Сделки и дань аннулированы: война (${S.players[i].name} ↔ ${S.players[j].name})`);
 }
 
@@ -1873,12 +1873,21 @@ function offerPeace(humanIdx, aiIdx) {
   return false;
 }
 
-function dealValue(bag) {
+function mapValue(fromIdx, toIdx) {
+  const from = exploredOf(fromIdx), to = exploredOf(toIdx);
+  let n = 0;
+  for (let k = 0; k < W * H; k++)
+    if (from[k] === 1 && !to[k]) n++;
+  return n ? Math.max(1, Math.round(n * 0.5)) : 0;
+}
+
+function dealValue(bag, fromIdx, toIdx) {
   if (!bag) return 0;
   let v = 0;
   for (const t of bag.techs || []) if (TECHS[t]) v += TECHS[t].cost;
   v += Math.max(0, bag.gold || 0);
   v += 40 * (bag.res || []).length;
+  if (bag.map && Number.isInteger(fromIdx) && Number.isInteger(toIdx)) v += mapValue(fromIdx, toIdx);
   return v;
 }
 
@@ -1887,7 +1896,7 @@ function aiAcceptsDeal(ai, other, aiGives, aiGets) {
   const gets = typeof aiGets === "string" ? { techs: [aiGets] } : (aiGets || {});
   const mil = (gives.techs || []).some((t) => MIL_TECHS.includes(t));
   const ratio = mil && strengthOf(other) > strengthOf(ai) ? 1 : 0.8;
-  return dealValue(gets) >= dealValue(gives) * ratio * relWarFactor(ai, other);
+  return dealValue(gets, other, ai) >= dealValue(gives, ai, other) * ratio * relWarFactor(ai, other);
 }
 
 function valueOfDeal(aiIdx, aiGivesId, aiGetsId) {
@@ -1922,11 +1931,12 @@ function activeResDeal(i, j, res) {
     ((d.from === i && d.to === j) || (d.from === j && d.to === i)));
 }
 
-function bagText(bag) {
+function bagText(bag, fromIdx, toIdx) {
   const parts = [];
   if ((bag.techs || []).length) parts.push(bag.techs.map((t) => TECHS[t].name).join(", "));
   if (bag.gold) parts.push(`${bag.gold}🪙`);
   if ((bag.res || []).length) parts.push(bag.res.map((r) => RESOURCES[r].name).join(", "));
+  if (bag.map) parts.push(`🗺 карта (${Number.isInteger(fromIdx) && Number.isInteger(toIdx) ? mapValue(fromIdx, toIdx) : 0} клеток)`);
   return parts.length ? parts.join(" + ") : "ничего";
 }
 
@@ -1944,9 +1954,9 @@ function offerDeal(fromIdx, toIdx, deal) {
   const giveTechs = give.techs || [], getTechs = get.techs || [];
   const giveGold = give.gold || 0, getGold = get.gold || 0;
   const giveRes = give.res || [], getRes = get.res || [];
-  if (giveTechs.length === 1 && getTechs.length === 1 && !giveGold && !getGold && !giveRes.length && !getRes.length)
+  if (giveTechs.length === 1 && getTechs.length === 1 && !giveGold && !getGold && !giveRes.length && !getRes.length && !give.map && !get.map)
     return offerTechTrade(fromIdx, toIdx, giveTechs[0], getTechs[0]);
-  if (dealValue(give) === 0 && dealValue(get) === 0) return no("пустая сделка");
+  if (dealValue(give, fromIdx, toIdx) === 0 && dealValue(get, toIdx, fromIdx) === 0) return no("пустая сделка");
   if (giveGold < 0 || getGold < 0) return no("некорректная сумма золота");
   if (S.turn - (r.lastTradeTurn ?? -99) < TRADE_COOLDOWN) return no("сделка была недавно");
   for (const t of giveTechs) {
@@ -1981,7 +1991,19 @@ function offerDeal(fromIdx, toIdx, deal) {
   for (const res of giveRes) S.resDeals.push({ from: fromIdx, to: toIdx, res, left: 20 });
   for (const res of getRes) S.resDeals.push({ from: toIdx, to: fromIdx, res, left: 20 });
   r.lastTradeTurn = S.turn;
-  addLog(`Сделка: ${from.name} ↔ ${to.name} — ${bagText(give)} за ${bagText(get)}`);
+  addLog(`Сделка: ${from.name} ↔ ${to.name} — ${bagText(give, fromIdx, toIdx)} за ${bagText(get, toIdx, fromIdx)}`);
+  if (give.map) {
+    let n = 0;
+    for (let k = 0; k < W * H; k++)
+      if (exploredOf(fromIdx)[k] === 1 && !exploredOf(toIdx)[k]) { exploredOf(toIdx)[k] = 1; n++; }
+    addLog(`Карта передана: ${to.name} получил ${n} клеток`);
+  }
+  if (get.map) {
+    let n = 0;
+    for (let k = 0; k < W * H; k++)
+      if (exploredOf(toIdx)[k] === 1 && !exploredOf(fromIdx)[k]) { exploredOf(fromIdx)[k] = 1; n++; }
+    addLog(`Карта передана: ${from.name} получил ${n} клеток`);
+  }
   return { ok: true };
 }
 
@@ -2008,6 +2030,7 @@ function demandTribute(fromIdx, toIdx) {
 function aiDiplomacy() {
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
   if (S.pendingTribute && S.turn > S.pendingTribute.turn) S.pendingTribute = null;
+  if (S.pendingMapOffer && S.turn > S.pendingMapOffer.turn) S.pendingMapOffer = null;
   for (const k of Object.keys(S.relations)) {
     const [a, b] = k.split(":").map(Number);
     if (S.relations[k].war && (!playerAlive(a) || !playerAlive(b))) {
@@ -2078,6 +2101,20 @@ function aiDiplomacy() {
       S.pendingTribute = { ai: i, amount, turn: S.turn };
       rel.lastTradeTurn = S.turn;
       addLog(`${S.players[i].name} требуют дань ${amount}🪙 в ход (10 ходов)`);
+      break;
+    }
+  }
+  if (!S.pendingMapOffer && playerAlive(0) && Math.random() < 0.2) {
+    for (let i = 1; i < S.players.length; i++) {
+      if (!playerAlive(i) || atWar(0, i)) continue;
+      const rel = S.relations[relKey(0, i)];
+      if (!rel || S.turn - (rel.lastTradeTurn ?? -99) < TRADE_COOLDOWN) continue;
+      const cells = mapValue(i, 0);
+      if (cells < 15) continue;
+      const price = Math.max(5, Math.round(cells * 0.5));
+      S.pendingMapOffer = { ai: i, cells, price, turn: S.turn };
+      rel.lastTradeTurn = S.turn;
+      addLog(`${S.players[i].name} предлагают купить их карту: ${cells} клеток за ${price}🪙`);
       break;
     }
   }
@@ -2205,6 +2242,7 @@ function load() {
     if (!Array.isArray(S.resDeals)) S.resDeals = [];
     if (!S.tributes || typeof S.tributes !== "object") S.tributes = {};
     if (!S.pendingTribute) S.pendingTribute = null;
+    if (!S.pendingMapOffer) S.pendingMapOffer = null;
     for (const tk of Object.keys(S.tributes)) {
       const [a, b] = tk.split(":").map(Number);
       if (Number.isInteger(a) && Number.isInteger(b) && !atWar(a, b) && playerAlive(a) && playerAlive(b)) continue;
@@ -2214,6 +2252,8 @@ function load() {
       !atWar(d.from, d.to) && playerAlive(d.from) && playerAlive(d.to) && d.left > 0 && !!RESOURCES[d.res]);
     if (S.pendingTribute && (!S.players[S.pendingTribute.ai] ||
       atWar(0, S.pendingTribute.ai) || !playerAlive(S.pendingTribute.ai))) S.pendingTribute = null;
+    if (S.pendingMapOffer && (!S.players[S.pendingMapOffer.ai] ||
+      atWar(0, S.pendingMapOffer.ai) || !playerAlive(S.pendingMapOffer.ai))) S.pendingMapOffer = null;
     if (S.over && !S.over.type) S.over.type = "conquest";
     for (const c of S.cities) {
       if (!c.religion) c.religion = null;
@@ -2227,6 +2267,7 @@ function load() {
     }
     S.players.forEach((p, i) => {
       p.isHuman = i === 0;
+      p.explored = Array.isArray(p.explored) ? p.explored : (i === 0 && Array.isArray(S.explored) ? S.explored : new Array(W * H).fill(0));
       if (!Array.isArray(p.techs)) p.techs = [];
       if (!("researching" in p)) p.researching = null;
       if (typeof p.progress !== "number") p.progress = 0;
@@ -2241,6 +2282,7 @@ function load() {
         p.cityNames = nat ? nat.cityNames.filter((n) => !taken.has(n)) : [];
       }
     });
+    delete S.explored;
     recomputeBorders();
     return !!S && !!S.map;
   } catch { return false; }
@@ -2258,7 +2300,7 @@ export {
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
   spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
-  offerDeal, dealValue, demandTribute, processDeals,
+  offerDeal, dealValue, mapValue, demandTribute, processDeals,
   unitAvailable, resourceConnected, resourceOwned, hasMarble, wonderCost, startImprovement, cancelWork,
 };
 
@@ -2294,6 +2336,7 @@ export function debugApi() {
     valueOfDeal,
     offerDeal,
     dealValue,
+    mapValue,
     demandTribute,
     processDeals,
     grantTech,
