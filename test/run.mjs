@@ -2557,7 +2557,10 @@ if (!mutation) {
     k: "FAIL diplomatic victory at 60 percent",
   };
   for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]) {
-    const r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
+    let r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
+    if (r.status === null || r.error) {
+      r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
+    }
     check(`mutation ${m} caught by tests`, r.status !== 0 && r.status !== null && (r.stdout || "").includes(expectFail[m]));
   }
 }
