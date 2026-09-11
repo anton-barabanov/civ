@@ -372,7 +372,7 @@ export function createCityMesh(pop, ownerColor, hasWalls = false, seed = 42) {
     add(group, geo(`c:r:${bw.toFixed(2)}`, () => new THREE.ConeGeometry(bw * 0.78, 0.07, 4)), roofMat, bx, 0.06 + bh + 0.035, bz).rotation.y = body.rotation.y + Math.PI / 4;
   }
   add(group, geo("c:pole", () => new THREE.CylinderGeometry(0.012, 0.012, 0.52, 5)), mat(C.woodDark), 0.03, 0.32, -0.03);
-  add(group, geo("c:flag", () => new THREE.BoxGeometry(0.13, 0.085, 0.012)), mat(ownerColor), 0.1, 0.53, -0.03);
+  add(group, geo("c:flag", () => new THREE.BoxGeometry(0.13, 0.085, 0.012)), mat(ownerColor), 0.1, 0.53, -0.03).name = "flag";
   if (hasWalls) {
     const wr = 0.33;
     const wallGeo = geo("c:wall", () => new THREE.BoxGeometry(0.245, 0.09, 0.045));

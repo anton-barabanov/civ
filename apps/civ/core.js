@@ -65,6 +65,7 @@ const WONDERS = {
   colossus: { name: "Колосс", icon: "🗿", cost: 160, tech: "currency", desc: "Удваивает золотой доход от морской торговли во всех городах", effects: { tradeMult: 2 } },
   greatwall: { name: "Великая стена", icon: "🧱", cost: 150, tech: "construction", desc: "+50% защиты всех городов", effects: { defMult: 1.5 } },
   oraclew: { name: "Оракул", icon: "✨", cost: 130, tech: "mysticism", desc: "Бесплатная технология при завершении", effects: { freeTech: 1 } },
+  worldcouncil: { name: "Всемирный совет", icon: "🕊", cost: 200, tech: "diplomacy", desc: "Выборы лидера мира каждые 15 ходов", effects: {} },
 };
 
 const SS_PARTS = {
@@ -96,6 +97,7 @@ const TECHS = {
   machinery: { name: "Машиностроение", cost: 120, req: ["engineering"] },
   banking: { name: "Банковское дело", cost: 105, req: ["currency", "monarchy"] },
   education: { name: "Образование", cost: 115, req: ["literature", "mathematics"] },
+  diplomacy: { name: "Дипломатия", cost: 140, req: ["literature", "currency"] },
   gunpowder: { name: "Порох", cost: 140, req: ["machinery", "education"] },
   chemistry: { name: "Химия", cost: 180, req: ["education", "gunpowder"] },
   electricity: { name: "Электричество", cost: 230, req: ["chemistry"] },
@@ -494,6 +496,7 @@ function newGame(diff = 1, opponents = 1) {
     relations: {},
     religions: [],
     wonders: [],
+    elections: [],
     space: {},
     resDeals: [],
     tributes: {},
@@ -2089,6 +2092,41 @@ function legendaryCities(pIdx) {
   return S.cities.filter((c) => c.owner === pIdx && (c.culture || 0) >= CULTURE_WIN_THRESHOLD);
 }
 
+function councilOwner() {
+  const w = S.wonders.find((x) => x.id === "worldcouncil");
+  if (!w) return null;
+  const c = cityById(w.cityId);
+  return c ? c.owner : null;
+}
+
+function councilSupport() {
+  const builder = councilOwner();
+  if (builder === null || !playerAlive(builder)) return null;
+  const voters = [];
+  let total = 0;
+  for (let i = 0; i < S.players.length; i++) {
+    if (!playerAlive(i)) continue;
+    total++;
+    if (i === builder || (!atWar(i, builder) && relWarFactor(i, builder) < 1.3)) voters.push(i);
+  }
+  return { builder, voters, votes: voters.length, total };
+}
+
+function processElections() {
+  if (S.over) return;
+  const w = S.wonders.find((x) => x.id === "worldcouncil");
+  if (!w) return;
+  const builder = councilOwner();
+  if (builder === null || !playerAlive(builder)) return;
+  const since = S.turn - w.turn;
+  if (since < 15 || since % 15 !== 0) return;
+  const r = councilSupport();
+  const won = r.total > 0 && r.votes >= 0.6 * r.total;
+  S.elections.push({ turn: S.turn, winner: builder, votes: r.votes, total: r.total, voters: r.voters, won });
+  addLog(`Голосование во Всемирном совете: ${r.votes} из ${r.total} за ${S.players[builder].name}`);
+  if (won) S.over = { winner: builder, type: "diplomacy" };
+}
+
 function checkVictory() {
   if (S.over) return;
   if (!playerAlive(0)) {
@@ -2129,6 +2167,7 @@ function endTurn() {
   aiDiplomacy();
   aiTurn();
   processEconomy();
+  processElections();
   S.turn++;
   computeVision();
   checkVictory();
@@ -2161,6 +2200,7 @@ function load() {
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
     if (!Array.isArray(S.religions)) S.religions = [];
     if (!Array.isArray(S.wonders)) S.wonders = [];
+    if (!Array.isArray(S.elections)) S.elections = [];
     if (!S.space) S.space = {};
     if (!Array.isArray(S.resDeals)) S.resDeals = [];
     if (!S.tributes || typeof S.tributes !== "object") S.tributes = {};
@@ -2216,7 +2256,7 @@ export {
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
   cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
-  spreadFaith, declareStateReligion, relWarFactor,
+  spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
   offerDeal, dealValue, demandTribute, processDeals,
   unitAvailable, resourceConnected, resourceOwned, hasMarble, wonderCost, startImprovement, cancelWork,
@@ -2271,6 +2311,8 @@ export function debugApi() {
     load,
     computeVision,
     processEconomy,
+    processElections,
+    councilOwner,
     processRevolts,
     flipCity,
     playerGoldPerTurn,

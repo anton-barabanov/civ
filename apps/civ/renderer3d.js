@@ -13,6 +13,8 @@ export async function createRenderer3D(container, handlers) {
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const canvas = renderer.domElement;
   canvas.style.display = "block";
   canvas.style.width = "100%";
@@ -23,7 +25,20 @@ export async function createRenderer3D(container, handlers) {
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(8, 14, 6);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 40;
   scene.add(sun);
+
+  function fitSunShadow() {
+    const c = sun.shadow.camera;
+    c.left = -(mapW / 2 + 2);
+    c.right = mapW / 2 + 2;
+    c.top = mapH / 2 + 2;
+    c.bottom = -(mapH / 2 + 2);
+    c.updateProjectionMatrix();
+  }
 
   const PHI_MIN = 0.15, PHI_MAX = 1.35, R_MIN = 6, R_MAX = 40;
   const orbit = { theta: 0, phi: 0.15, radius: 26, target: new THREE.Vector3(0, 0, 0) };
@@ -145,6 +160,7 @@ export async function createRenderer3D(container, handlers) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
+    fitSunShadow();
   }
 
   let ro = null;
@@ -192,10 +208,13 @@ export async function createRenderer3D(container, handlers) {
         const g = models.createTerrainMesh(t.terrain, t.x * 31 + t.y * 17);
         g.position.set(tileX(t.x, vm), 0, tileZ(t.y, vm));
         const kids = [];
+        const forest = t.terrain === 3;
         g.traverse((o) => {
           if (!o.isMesh) return;
           o.userData.tile = { x: t.x, y: t.y };
           o.userData.baseMat = o.material;
+          o.receiveShadow = true;
+          if (forest && o.position.y > 0) o.castShadow = true;
           kids.push(o);
         });
         tileRoot.add(g);
@@ -273,12 +292,13 @@ export async function createRenderer3D(container, handlers) {
         ring.visible = false;
         holder.add(ring);
         overlayRoot.add(holder);
-        e = { holder, mesh: null, ring, type: null, owner: -1 };
+        e = { holder, mesh: null, ring, type: null, owner: -1, lastX: NaN, lastZ: NaN, baseY: 0, animT: 1, spawnT: 0 };
         unitHolders.set(u.id, e);
       }
       if (e.type !== u.type || e.owner !== u.owner) {
         if (e.mesh) e.holder.remove(e.mesh);
         e.mesh = models.createUnitMesh(u.type, vm.players[u.owner].color);
+        e.mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
         e.holder.add(e.mesh);
         e.type = u.type;
         e.owner = u.owner;
@@ -287,7 +307,15 @@ export async function createRenderer3D(container, handlers) {
       const i = per.get(k) || 0;
       per.set(k, i + 1);
       const water = vm.tiles[k].terrain === 0;
-      e.holder.position.set(tileX(u.x, vm) + i * 0.22, water ? -0.03 : 0, tileZ(u.y, vm) + i * 0.22);
+      const px = tileX(u.x, vm) + i * 0.22;
+      const pz = tileZ(u.y, vm) + i * 0.22;
+      if (e.lastX !== px || e.lastZ !== pz) {
+        e.lastX = px;
+        e.lastZ = pz;
+        e.animT = 0;
+      }
+      e.baseY = water ? -0.03 : 0;
+      e.holder.position.set(px, e.baseY, pz);
       e.ring.position.y = water ? 0.06 : 0.012;
       e.ring.visible = u.owner === 0 && u.movesLeft > 0;
     }
@@ -303,7 +331,7 @@ export async function createRenderer3D(container, handlers) {
       if (!e) {
         const holder = new THREE.Group();
         overlayRoot.add(holder);
-        e = { holder, mesh: null, pop: -1, walls: null, owner: -1, religion: null, relMesh: null, wonder: null, wMesh: null };
+        e = { holder, mesh: null, pop: -1, walls: null, owner: -1, religion: null, relMesh: null, wonder: null, wMesh: null, flag: null, flagPhase: c.id % 7, spawnT: 0 };
         cityHolders.set(c.id, e);
       }
       const walls = !!c.walls;
@@ -311,10 +339,13 @@ export async function createRenderer3D(container, handlers) {
       if (e.pop !== c.pop || e.walls !== walls || e.owner !== c.owner || e.wonder !== wonder) {
         if (e.mesh) e.holder.remove(e.mesh);
         e.mesh = models.createCityMesh(c.pop, vm.players[c.owner].color, walls, c.id % 100000);
+        e.mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+        e.flag = e.mesh.getObjectByName("flag");
         e.holder.add(e.mesh);
         if (e.wMesh) e.holder.remove(e.wMesh);
         e.wMesh = wonder ? models.createWonderMesh(wonder) : null;
         if (e.wMesh) {
+          e.wMesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
           e.wMesh.position.set(0.25, 0, -0.25);
           e.holder.add(e.wMesh);
         }
@@ -416,17 +447,62 @@ export async function createRenderer3D(container, handlers) {
     if (destroyed) return;
     mapW = vm.W;
     mapH = vm.H;
+    fitSunShadow();
     syncTiles(vm);
     syncEntities(vm);
     syncBorders(vm);
   }
 
   const clockStart = performance.now();
+  let lastNow = clockStart;
+  const dtBuf = new Float32Array(90);
+  let dtIdx = 0;
+  let dtCnt = 0;
+  let fpsT = 0;
+  let shadowsOn = true;
   function frame() {
     if (destroyed) return;
     rafId = requestAnimationFrame(frame);
-    const t = (performance.now() - clockStart) / 1000;
-    for (const e of oceanGroups) e.group.position.y = 0.03 * Math.sin(t * 2 + (e.x + e.y) * 0.8);
+    const now = performance.now();
+    const dtMs = now - lastNow;
+    lastNow = now;
+    const dt = dtMs / 1000;
+    const t = (now - clockStart) / 1000;
+    for (const e of oceanGroups) {
+      e.group.position.y = 0.03 * Math.sin(t * 2 + (e.x + e.y) * 0.8);
+      if (e.resMesh) e.resMesh.rotation.y = 0.2 * Math.sin(t * 1.5 + (e.x + e.y));
+    }
+    for (const e of unitHolders.values()) {
+      if (e.animT < 0.3) {
+        e.animT += dt;
+        e.holder.position.y = e.animT < 0.3 ? e.baseY + 0.09 * Math.sin(Math.PI * e.animT / 0.3) : e.baseY;
+      }
+      if (e.spawnT < 0.3) {
+        e.spawnT += dt;
+        e.holder.scale.setScalar(e.spawnT < 0.3 ? 0.05 + 0.95 * (e.spawnT / 0.3) : 1);
+      }
+    }
+    for (const e of cityHolders.values()) {
+      if (e.spawnT < 0.3) {
+        e.spawnT += dt;
+        e.holder.scale.setScalar(e.spawnT < 0.3 ? 0.05 + 0.95 * (e.spawnT / 0.3) : 1);
+      }
+      if (e.flag) e.flag.rotation.y = 0.15 * Math.sin(t * 2 + e.flagPhase);
+    }
+    dtBuf[dtIdx] = dtMs;
+    dtIdx = (dtIdx + 1) % dtBuf.length;
+    if (dtCnt < dtBuf.length) dtCnt++;
+    fpsT += dtMs;
+    if (shadowsOn && fpsT >= 1500) {
+      fpsT = 0;
+      let slow = 0;
+      for (let i = 0; i < dtCnt; i++) if (dtBuf[i] > 20) slow++;
+      if (slow / dtCnt > 0.6) {
+        shadowsOn = false;
+        sun.castShadow = false;
+        console.log("тени отключены: низкий FPS");
+      }
+    }
     renderer.render(scene, camera);
   }
 

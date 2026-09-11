@@ -8,7 +8,7 @@ import {
   RELIGIONS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
-  startImprovement, cancelWork, spreadFaith, declareStateReligion,
+  startImprovement, cancelWork, spreadFaith, declareStateReligion, councilSupport,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -161,6 +161,7 @@ function renderTopbar() {
   const netStr = `${gold.net >= 0 ? "+" : ""}${gold.net}`;
   const happinessTotal = S.cities.filter((c) => c.owner === 0)
     .reduce((a, c) => a + (c.happy ?? 1) - (c.unhappy ?? 0), 0);
+  const council = councilSupport();
   const el = document.getElementById("civ-top");
   if (!el) return;
   el.innerHTML = `
@@ -174,6 +175,7 @@ function renderTopbar() {
       <div class="civ-sci civ-gold" title="Золото: доход ${gold.income}🪙 − содержание ${gold.upkeep}🪙 = ${netStr}🪙 за ход">🪙 ${p.gold} (${netStr})${goldStrike ? ` <span class="civ-warn">⚠ наука остановлена</span>` : ""}</div>
       <div class="civ-cult" title="Легендарные города: ${legendaryCities(0).length} из ${CULTURE_WIN_CITIES}">🏛 ${legendaryCities(0).length}/${CULTURE_WIN_CITIES}</div>
       <div class="civ-cult" title="Космический корабль">🚀 ${(S.space[0] || []).length}/${Object.keys(SS_PARTS).length}</div>
+      ${council ? `<div class="civ-cult" title="Поддержка во Всемирном совете">🤝 ${Math.round((100 * council.votes) / council.total)}%</div>` : ""}
       <div class="civ-cult" title="Суммарное счастье городов: счастье − недовольство">😊 ${happinessTotal >= 0 ? "+" : ""}${happinessTotal}</div>
     </div>
     <div class="topbar-row topbar-actions">
@@ -344,6 +346,36 @@ function refresh() {
   renderPanel();
   if (renderer) renderer.draw(buildViewModel());
   renderOver();
+  renderElectionModal();
+}
+
+let electionModalShown = null;
+
+function renderElectionModal() {
+  const S = getState();
+  const list = S.elections || [];
+  const last = list.length ? list[list.length - 1] : null;
+  if (!last || S.over || electionModalShown === last || last.turn < S.turn - 1) return;
+  if (document.getElementById("civ-modal")) return;
+  electionModalShown = last;
+  const alive = (i) => S.cities.some((c) => c.owner === i) || S.units.some((u) => u.owner === i && u.type === "settler");
+  const dots = (arr) => arr.map((i) => (S.players[i] ? `<i class="civ-dot" style="background:${S.players[i].color}" title="${escapeHtml(S.players[i].name)}"></i>` : "")).join(" ");
+  const winner = S.players[last.winner] || S.players[0];
+  const m = document.createElement("div");
+  m.className = "civ-modal";
+  m.id = "civ-modal";
+  m.innerHTML = `
+    <div class="civ-dialog">
+      <h2>🕊 Всемирный совет</h2>
+      <p>Голосование хода ${last.turn}${last.won ? " · лидер мира избран" : " · большинство не достигнуто"}</p>
+      <div class="civ-yields">Кандидат: ${escapeHtml(winner.name)} · за ${last.votes} из ${last.total} (${last.total ? Math.round((100 * last.votes) / last.total) : 0}%)</div>
+      <div class="civ-sum-row">За: ${dots(last.voters)}</div>
+      <div class="civ-sum-row">Воздержались: ${dots(S.players.map((_, i) => i).filter((i) => alive(i) && !last.voters.includes(i)))}</div>
+      <button class="btn primary" id="civ-close">Закрыть</button>
+    </div>
+  `;
+  rootEl.appendChild(m);
+  document.getElementById("civ-close").onclick = closeModal;
 }
 
 function renderOver() {
@@ -356,22 +388,28 @@ function renderOver() {
     el.className = "civ-modal";
     rootEl.appendChild(el);
   }
-  const type = S.over.type === "culture" ? "culture" : S.over.type === "space" ? "space" : "conquest";
+  const type = S.over.type === "culture" ? "culture" : S.over.type === "space" ? "space" : S.over.type === "diplomacy" ? "diplomacy" : "conquest";
   const draw = S.over.winner === -1;
   const win = !draw && S.over.winner === 0;
   const winner = S.players[S.over.winner] || S.players[0];
+  const dipElection = (S.elections || []).filter((e) => e.winner === S.over.winner).pop() || null;
+  const dipPct = dipElection && dipElection.total ? Math.round((100 * dipElection.votes) / dipElection.total) : 0;
   const title = draw ? "🤝 Ничья"
     : !win ? "💀 Поражение"
     : type === "culture" ? "🕊 Культурная победа!"
     : type === "space" ? "🚀 Научная победа!"
+    : type === "diplomacy" ? "🕊 Дипломатическая победа!"
     : "🏆 Победа завоеванием!";
   const sub = draw ? "Взаимное уничтожение: цивилизации пали в одной войне."
     : !win
     ? type === "space"
       ? `${escapeHtml(winner.name)} первыми вышли к звёздам: космический корабль запущен`
+      : type === "diplomacy"
+      ? `${escapeHtml(winner.name)} избраны во Всемирном совете лидером мира`
       : `${escapeHtml(winner.name)} победили ${type === "culture" ? "культурно" : "завоеванием"}`
     : type === "culture" ? "Ваши легендарные города — слава веков."
     : type === "space" ? `Космический корабль собран за ${S.turn} ходов.`
+    : type === "diplomacy" ? `Поддержка ${dipPct}% голосов на выборах хода ${dipElection ? dipElection.turn : S.turn}.`
     : "Все противники повержены.";
   const myCities = S.cities.filter((c) => c.owner === 0);
   const cultureTotal = myCities.reduce((a, c) => a + (c.culture || 0), 0);
