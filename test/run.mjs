@@ -235,6 +235,7 @@ api.S.players[0].gold = 500;
 api.S.units = api.S.units.filter((u) => u.owner === 0);
 for (let i = 0; i < 15 && !api.S.players[0].techs.includes("agriculture"); i++) {
   api.S.over = null;
+  api.S.players[0].gold = 500;
   if (!api.S.cities.some((c) => c.owner === 0)) {
     let li = -1;
     for (let j = 0; j < api.S.map.length; j++) {

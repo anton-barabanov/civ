@@ -40,7 +40,7 @@ export async function createRenderer3D(container, handlers) {
     c.updateProjectionMatrix();
   }
 
-  const PHI_MIN = 0.15, PHI_MAX = 1.35, R_MIN = 6, R_MAX = 40;
+  const PHI_MIN = 0.15, PHI_MAX = 1.35, R_MIN = 4, R_MAX = 40;
   const orbit = { theta: 0, phi: 0.15, radius: 26, target: new THREE.Vector3(0, 0, 0) };
 
   function applyCamera() {
@@ -541,5 +541,5 @@ export async function createRenderer3D(container, handlers) {
     container.innerHTML = "";
   }
 
-  return { draw, destroy };
+  return { draw, destroy, zoom };
 }

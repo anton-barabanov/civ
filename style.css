@@ -105,10 +105,34 @@ body {
 .civ-end:hover { filter: brightness(1.06); }
 
 .civ-map-wrap {
+  position: relative;
   max-width: 100%;
   overflow-x: auto;
   padding: 8px 10px 0;
 }
+.civ-zoom {
+  position: absolute;
+  right: 20px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+}
+.civ-zoom button {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--on-surface);
+  font-size: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+}
+.civ-zoom button:hover { background: var(--primary); color: #211a33; }
 #civ-canvas {
   display: block;
   max-width: 100%;

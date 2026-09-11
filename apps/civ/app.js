@@ -17,51 +17,26 @@ export { debugApi } from "./core.js";
 let rootEl = null;
 let hubCtx = null;
 let renderer = null;
-let rendererMode = "2d";
 let rendererGen = 0;
 
-function initialRendererMode() {
-  if (typeof location === "undefined") return "2d";
-  try {
-    const q = new URLSearchParams(location.search).get("renderer");
-    if (q === "3d" || q === "2d") return q;
-    const saved = localStorage.getItem("civ_renderer");
-    if (saved === "3d" || saved === "2d") return saved;
-  } catch (e) {}
-  return "3d";
-}
-
-function persistRenderer(mode) {
-  rendererMode = mode;
-  if (typeof localStorage !== "undefined") {
-    try { localStorage.setItem("civ_renderer", mode); } catch (e) {}
-  }
-}
-
-async function swapRenderer(mode) {
+async function swapRenderer() {
   const gen = ++rendererGen;
   const mapEl = document.getElementById("civ-map");
   if (!mapEl) return;
   if (renderer) { renderer.destroy(); renderer = null; }
   mapEl.innerHTML = "";
   let next = null;
-  if (mode === "3d") {
-    try {
-      const mod = await import("./renderer3d.js");
-      next = await mod.createRenderer3D(mapEl, { onTileClick, onTileRightClick });
-    } catch (e) {
-      console.log("3D недоступно, включён 2D", e);
-      const S = getState();
-      if (S.log) { S.log.unshift("3D недоступно, включён 2D"); if (S.log.length > 30) S.log.length = 30; }
-      mode = "2d";
-    }
+  try {
+    const mod = await import("./renderer3d.js");
+    next = await mod.createRenderer3D(mapEl, { onTileClick, onTileRightClick });
+  } catch (e) {
+    console.log("3D недоступно, включён резервный 2D", e);
   }
   if (gen !== rendererGen) {
     if (next) next.destroy();
     return;
   }
   if (!next) next = createRenderer2D(mapEl, { onTileClick, onTileRightClick });
-  persistRenderer(mode);
   renderer = next;
   refresh();
 }
@@ -179,7 +154,6 @@ function renderTopbar() {
       <div class="civ-cult" title="Суммарное счастье городов: счастье − недовольство">😊 ${happinessTotal >= 0 ? "+" : ""}${happinessTotal}</div>
     </div>
     <div class="topbar-row topbar-actions">
-      <button class="civ-tech-btn" id="civ-render-toggle">${rendererMode === "3d" ? "2D" : "3D"}</button>
       <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
       <button class="civ-tech-btn" id="civ-religion">Религия</button>
       <button class="civ-tech-btn" id="civ-tech">Технологии</button>
@@ -191,7 +165,6 @@ function renderTopbar() {
     if (hubCtx && hubCtx.back) hubCtx.back();
     else showStart(true);
   };
-  document.getElementById("civ-render-toggle").onclick = () => swapRenderer(rendererMode === "3d" ? "2d" : "3d");
   document.getElementById("civ-diplo").onclick = showDiplo;
   document.getElementById("civ-religion").onclick = showReligion;
   document.getElementById("civ-tech").onclick = showTech;
@@ -964,14 +937,20 @@ export const civApp = {
     const hadSave = load();
     root.innerHTML = `
       <div class="topbar" id="civ-top"></div>
-      <div class="civ-map-wrap" id="civ-map"></div>
+      <div class="civ-map-wrap">
+        <div id="civ-map"></div>
+        <div class="civ-zoom">
+          <button id="civ-zoom-in" title="Приблизить">+</button>
+          <button id="civ-zoom-out" title="Отдалить">−</button>
+        </div>
+      </div>
       <div id="civ-panel" class="civ-panel"></div>
     `;
     rendererGen++;
-    rendererMode = initialRendererMode();
     renderer = null;
-    if (rendererMode === "3d") swapRenderer("3d");
-    else renderer = createRenderer2D(document.getElementById("civ-map"), { onTileClick, onTileRightClick });
+    swapRenderer();
+    document.getElementById("civ-zoom-in").onclick = () => renderer && renderer.zoom && renderer.zoom(-140);
+    document.getElementById("civ-zoom-out").onclick = () => renderer && renderer.zoom && renderer.zoom(140);
     if (!hadSave) newGame();
     computeVision();
     refresh();

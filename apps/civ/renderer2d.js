@@ -185,5 +185,5 @@ export function createRenderer2D(container, handlers) {
     container.innerHTML = "";
   }
 
-  return { draw, destroy };
+  return { draw, destroy, zoom: () => {} };
 }
