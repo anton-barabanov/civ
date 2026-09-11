@@ -33,7 +33,7 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = ["a", "b", "c", "d", "e", "f", "g", "h"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
 const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
@@ -44,6 +44,9 @@ const MUT_TARGETS = {
   f: ['  if (S.turn - (r.lastTradeTurn ?? -99) < TRADE_COOLDOWN) return no("обмен был недавно");\n', ""],
   g: ["Math.max(0, c.pop - 4)", "0"],
   h: ['im.kind === "farm") f += 1;', 'im.kind === "farm") f += 0;'],
+  i: ["const cost = fromRoad && roadDoneAt(k) ? 1 : 2;", "const cost = fromRoad && roadDoneAt(k) ? 2 : 2;"],
+  j: ["  if (S.resDeals && S.resDeals.some((d) => (d.from === i && d.to === j) || (d.from === j && d.to === i))) {\n    S.resDeals = S.resDeals.filter((d) => !((d.from === i && d.to === j) || (d.from === j && d.to === i)));\n    purged = true;\n  }\n", ""],
+  k: ["const won = r.total > 0 && r.votes >= 0.6 * r.total;", "const won = r.total > 0 && r.votes >= 2.0 * r.total;"],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -2216,6 +2219,328 @@ check("pre-sprint4 save migrates", api.load() === true && Array.isArray(api.S.im
 api.endTurn();
 check("migrated save plays on", api.S.turn >= 1);
 
+api.newGame(1);
+api.S.units = [];
+let roadRun = null;
+for (let j = 0; j < api.S.map.length && !roadRun; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (x > 22 || y === 0 || y === 17) continue;
+  let ok = true;
+  for (let d = 0; d < 4; d++) {
+    const t = api.S.map[y * 26 + x + d];
+    if (t === 0 || t === 5) { ok = false; break; }
+  }
+  if (ok) roadRun = [x, y];
+}
+if (roadRun) {
+  const ru = api.spawn("warrior", 0, roadRun[0], roadRun[1]);
+  ru.moves = 1;
+  const rr0 = api.reachable(ru);
+  check("off road two tiles out of reach",
+    rr0.has(roadRun[1] * 26 + roadRun[0] + 1) && !rr0.has(roadRun[1] * 26 + roadRun[0] + 2));
+  for (let d = 0; d < 3; d++) api.S.impr[roadRun[1] * 26 + roadRun[0] + d] = { kind: "road" };
+  const rr1 = api.reachable(ru);
+  check("road speed doubles movement reach",
+    rr1.has(roadRun[1] * 26 + roadRun[0] + 2) && ru.moves === 1);
+} else {
+  check("off road two tiles out of reach", false);
+  check("road speed doubles movement reach", false);
+}
+
+api.newGame(1);
+api.S.resDeals = [{ from: 1, to: 0, res: "horses", left: 20 }];
+api.S.tributes = { "1:0": { amount: 5, turnsLeft: 10 } };
+api.declareWar(0, 1);
+check("declareWar annuls tribute and resource deals",
+  api.S.resDeals.length === 0 && Object.keys(api.S.tributes).length === 0 &&
+  api.S.log.some((l) => l.includes("аннулированы")));
+
+api.newGame(1, 4);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const dipCity = api.S.cities[0];
+api.S.players[0].techs.push("diplomacy");
+dipCity.producing = { k: "wonder", id: "worldcouncil" };
+dipCity.prodStored = 999;
+api.processEconomy();
+const dipW = api.S.wonders.find((w) => w.id === "worldcouncil");
+check("world council built and owned", !!dipW && dipW.owner === 0 && api.councilOwner() === 0);
+if (dipW) {
+  api.declareWar(0, 1);
+  api.declareWar(0, 2);
+  api.S.over = null;
+  api.S.turn = dipW.turn + 14;
+  api.processElections();
+  check("no elections before 15 turns after council", api.S.elections.length === 0);
+  api.S.turn = dipW.turn + 15;
+  api.processElections();
+  check("diplomatic victory at 60 percent", api.S.elections.length === 1 &&
+    api.S.elections[0].votes === 3 && api.S.elections[0].total === 5 &&
+    api.S.over && api.S.over.type === "diplomacy" && api.S.over.winner === 0);
+} else {
+  check("no elections before 15 turns after council", false);
+  check("diplomatic victory at 60 percent", false);
+}
+
+if (!fast) {
+  api.newGame(1, 2);
+  api.S.units = [];
+  const dlSpots = cultSpots();
+  api.foundCity(api.spawn("settler", 0, dlSpots[0][0], dlSpots[0][1]));
+  api.foundCity(api.spawn("settler", 1, dlSpots[1][0], dlSpots[1][1]));
+  for (let i = 0; i < api.S.res.length; i++)
+    if (api.S.res[i] === "iron" || api.S.res[i] === "horses" || api.S.res[i] === "marble") api.S.res[i] = null;
+  api.recomputeBorders();
+  const dlP1City = api.S.cities.find((c) => c.owner === 1);
+  const dlP1Tiles = [];
+  for (let i = 0; i < api.S.tileOwner.length; i++)
+    if (api.S.tileOwner[i] === 1 && i !== dlP1City.y * 26 + dlP1City.x) dlP1Tiles.push(i);
+  api.S.res[dlP1Tiles[0]] = "horses";
+  api.S.players[0].techs.push("writing", "horsebackriding");
+  const dlRes = api.offerDeal(0, 1, { give: { techs: ["writing"], gold: 14 }, get: { res: ["horses"] } });
+  check("offerDeal exchanges tech and gold for resource", dlRes.ok === true &&
+    api.S.resDeals.length === 1 && api.S.resDeals[0].from === 1 && api.S.resDeals[0].to === 0 &&
+    api.S.resDeals[0].res === "horses" && api.S.resDeals[0].left === 20 &&
+    api.S.players[0].gold === 36 && api.S.players[1].gold === 64 &&
+    api.S.players[1].techs.includes("writing") && api.S.log.some((l) => l.includes("Сделка:")));
+  check("resource deal connects resource", api.resourceOwned(0, "horses") === false &&
+    api.resourceConnected(0, "horses") === true && api.unitAvailable(0, "horseman") === true);
+  const dlRe = api.offerDeal(0, 2, { give: { res: ["horses"] }, get: { gold: 40 } });
+  check("resale of imported resource rejected", dlRe.ok === false && dlRe.reason.includes("ресурс не подключён") &&
+    api.S.resDeals.length === 1);
+  api.S.turn += 10;
+  const dlDup = api.offerDeal(0, 1, { give: { gold: 30 }, get: { res: ["horses"] } });
+  check("duplicate resource deal rejected", dlDup.ok === false &&
+    dlDup.reason.includes("уже действует") && api.S.players[0].gold === 36 && api.S.resDeals.length === 1);
+  for (let i = 0; i < 19; i++) api.processDeals();
+  check("resource deal ticks down", api.S.resDeals.length === 1 && api.S.resDeals[0].left === 1 &&
+    api.resourceConnected(0, "horses") === true);
+  api.processDeals();
+  check("resource deal expires after 20 turns", api.S.resDeals.length === 0 &&
+    api.resourceConnected(0, "horses") === false && api.unitAvailable(0, "horseman") === false &&
+    api.S.log.some((l) => l.includes("Срок сделки о ресурсе истёк")));
+
+  for (let i = 0; i < 3; i++) api.spawn("warrior", 0, dlSpots[0][0], dlSpots[0][1]);
+  api.S.players[0].gold = 0;
+  api.S.players[1].gold = 100;
+  const trib = api.demandTribute(0, 1);
+  check("tribute demanded from weak AI", trib.ok === true && trib.amount === 5 &&
+    api.S.tributes["1:0"] && api.S.tributes["1:0"].amount === 5 && api.S.tributes["1:0"].turnsLeft === 10 &&
+    api.S.log.some((l) => l.includes("Дань:")));
+  const tribCd = api.demandTribute(0, 1);
+  check("tribute demand cooldown", tribCd.ok === false && tribCd.reason.includes("недавно") &&
+    api.S.tributes["1:0"].turnsLeft === 10);
+  for (let i = 0; i < 9; i++) api.processDeals();
+  check("tribute pays gold each turn", api.S.players[0].gold === 45 && api.S.players[1].gold === 55 &&
+    api.S.tributes["1:0"].turnsLeft === 1);
+  api.processDeals();
+  check("tribute ends after 10 turns", Object.keys(api.S.tributes).length === 0 &&
+    api.S.players[0].gold === 50 && api.S.players[1].gold === 50 &&
+    api.S.log.some((l) => l.includes("Дань завершена")));
+  api.S.turn += 10;
+  check("resource deal re-established after cooldown",
+    api.offerDeal(0, 1, { give: { gold: 50 }, get: { res: ["horses"] } }).ok === true && api.S.resDeals.length === 1);
+  api.S.turn += 10;
+  check("tribute re-established after cooldown", api.demandTribute(0, 1).ok === true &&
+    Object.keys(api.S.tributes).length === 1);
+  api.declareWar(0, 1);
+  check("declareWar tears up live tribute and deals",
+    api.S.resDeals.length === 0 && Object.keys(api.S.tributes).length === 0);
+
+  api.newGame(1);
+  const trSet = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+  for (let i = 0; i < 3; i++) api.spawn("knight", 1, trSet.x, trSet.y);
+  api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+  api.S.units = api.S.units.filter((u) => u.owner !== 0 || u.type !== "warrior");
+  const tribNo = api.demandTribute(0, 1);
+  check("strong AI refuses tribute", tribNo.ok === false && tribNo.reason.includes("отказываются платить") &&
+    Object.keys(api.S.tributes).length === 0);
+
+  api.newGame(1);
+  api.S.units = [];
+  let rbBase = null;
+  for (let j = 0; j < api.S.map.length && !rbBase; j++) {
+    const x = j % 26, y = (j / 26) | 0;
+    if (x > 22 || y === 0 || y === 17) continue;
+    let ok = true;
+    for (let d = 0; d < 3; d++) {
+      const t = api.S.map[y * 26 + x + d];
+      if (t === 0 || t === 5) { ok = false; break; }
+    }
+    if (ok) rbBase = [x, y];
+  }
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 3; dx++) {
+      api.S.map[(rbBase[1] + dy) * 26 + rbBase[0] + dx] = 1;
+      api.S.res[(rbBase[1] + dy) * 26 + rbBase[0] + dx] = null;
+    }
+  api.foundCity(api.spawn("settler", 0, rbBase[0], rbBase[1]));
+  api.foundCity(api.spawn("settler", 0, rbBase[0] + 2, rbBase[1]));
+  const rbA = api.S.cities[0], rbB = api.S.cities[1];
+  const rbMid = rbBase[1] * 26 + rbBase[0] + 1;
+  const rbW = api.spawn("worker", 0, rbBase[0] + 1, rbBase[1]);
+  check("road work started for 2 turns", api.startImprovement(rbW.id, "road").ok === true &&
+    rbW.work.left === 2 && api.S.impr[rbMid].kind === "road" && api.S.impr[rbMid].left === 2);
+  api.processEconomy();
+  check("road unfinished after 1 turn", api.S.impr[rbMid].left === 1 && api.roadDoneAt(rbMid) === false);
+  api.processEconomy();
+  check("road completes after 2 turns", api.roadDoneAt(rbMid) === true && rbW.work === null);
+  check("land trade connects road-linked cities", api.landTradeActive(rbA) === true &&
+    api.landTradeActive(rbB) === true && api.tradeActive(rbA) === false);
+  const rbY = api.cityYields(rbA);
+  check("land trade yields 1 gold", rbY.trade === true && rbY.tradeGold === 1 &&
+    rbY.gold === 3 + Math.floor(rbA.pop / 2) + 1);
+
+  api.newGame(1);
+  api.S.units = [];
+  let slPair = null;
+  for (let j = 0; j < api.S.map.length && !slPair; j++) {
+    const x = j % 26, y = (j / 26) | 0;
+    if (x > 22 || y < 1 || y > 16) continue;
+    let land = true, waterBelow = true, waterAbove = true;
+    for (let d = 0; d < 3; d++) {
+      if (api.S.map[y * 26 + x + d] === 0 || api.S.map[y * 26 + x + d] === 5) land = false;
+      if (api.S.map[(y - 1) * 26 + x + d] !== 0) waterAbove = false;
+      if (api.S.map[(y + 1) * 26 + x + d] !== 0) waterBelow = false;
+    }
+    if (land && (waterBelow || waterAbove)) slPair = [x, y];
+  }
+  check("coastal road pair found", slPair !== null);
+  if (slPair) {
+    api.S.players[0].techs.push("sailing");
+    api.foundCity(api.spawn("settler", 0, slPair[0], slPair[1]));
+    api.foundCity(api.spawn("settler", 0, slPair[0] + 2, slPair[1]));
+    const slA = api.S.cities[0];
+    const slW = api.spawn("worker", 0, slPair[0] + 1, slPair[1]);
+    api.startImprovement(slW.id, "road");
+    api.processEconomy();
+    api.processEconomy();
+    check("sea and land trade do not stack", api.tradeActive(slA) === true &&
+      api.landTradeActive(slA) === true && api.cityYields(slA).tradeGold === 2);
+  }
+
+  api.newGame(1);
+  api.S.units = [];
+  api.foundCity(api.spawn("settler", 0, cultSpots()[0][0], cultSpots()[0][1]));
+  const nuCity = api.S.cities[0];
+  check("late game units table data", UT.rifleman.name === "Пехота" && UT.rifleman.icon === "🪖" &&
+    UT.rifleman.atk === 12 && UT.rifleman.def === 10 && UT.rifleman.moves === 1 && UT.rifleman.cost === 120 &&
+    UT.rifleman.tech === "electricity" && JSON.stringify(UT.rifleman.res) === '["iron"]' && UT.rifleman.upgrade === null &&
+    UT.cavalry.name === "Кавалерия" && UT.cavalry.atk === 14 && UT.cavalry.def === 6 && UT.cavalry.moves === 3 &&
+    UT.cavalry.cost === 140 && UT.cavalry.tech === "electricity" &&
+    JSON.stringify(UT.cavalry.res) === '["horses","iron"]' && UT.cavalry.upgrade === null &&
+    UT.artillery.name === "Артиллерия" && UT.artillery.atk === 16 && UT.artillery.def === 4 &&
+    UT.artillery.moves === 1 && UT.artillery.cost === 150 && UT.artillery.tech === "chemistry" &&
+    !UT.artillery.res && UT.artillery.upgrade === null);
+  for (let i = 0; i < api.S.res.length; i++)
+    if (api.S.res[i] === "iron" || api.S.res[i] === "horses" || api.S.res[i] === "marble") api.S.res[i] = null;
+  api.S.players[0].techs.push("bronze", "iron", "wheel", "horsebackriding", "feudalism", "machinery", "gunpowder", "electricity", "chemistry");
+  api.recomputeBorders();
+  const nuOwn = [];
+  for (let i = 0; i < api.S.tileOwner.length; i++)
+    if (api.S.tileOwner[i] === 0 && i !== nuCity.y * 26 + nuCity.x) nuOwn.push(i);
+  check("rifleman and cavalry locked without resources",
+    api.unitAvailable(0, "rifleman") === false && api.unitAvailable(0, "cavalry") === false);
+  check("artillery gated by tech only", api.unitAvailable(0, "artillery") === true);
+  api.S.res[nuOwn[0]] = "iron";
+  check("rifleman unlocked by iron", api.unitAvailable(0, "rifleman") === true &&
+    api.unitAvailable(0, "cavalry") === false);
+  api.S.res[nuOwn[1]] = "horses";
+  check("cavalry unlocked by horses and iron", api.unitAvailable(0, "cavalry") === true);
+  check("late upgrade prices", api.upgradeCost({ type: "musketman" }) === 40 &&
+    api.upgradeCost({ type: "knight" }) === 110 && api.upgradeCost({ type: "catapult" }) === 160);
+  const luM = api.spawn("musketman", 0, nuCity.x, nuCity.y);
+  api.S.players[0].gold = 200;
+  check("musketman upgraded to rifleman", api.upgradeUnit(luM).ok === true && luM.type === "rifleman" &&
+    api.S.players[0].gold === 160);
+  const luK = api.spawn("knight", 0, nuCity.x, nuCity.y);
+  check("knight upgraded to cavalry", api.upgradeUnit(luK).ok === true && luK.type === "cavalry" &&
+    api.S.players[0].gold === 50);
+  api.S.players[0].gold = 200;
+  const luC = api.spawn("catapult", 0, nuCity.x, nuCity.y);
+  check("catapult upgraded to artillery", api.upgradeUnit(luC).ok === true && luC.type === "artillery" &&
+    api.S.players[0].gold === 40);
+
+  let genRun = null;
+  for (let j = 0; j < api.S.map.length && !genRun; j++) {
+    const x = j % 26, y = (j / 26) | 0;
+    if (x > 21 || y === 0 || y === 17) continue;
+    let ok = true;
+    for (let d = 0; d < 4; d++) {
+      const t = api.S.map[y * 26 + x + d];
+      if (t === 0 || t === 5) { ok = false; break; }
+    }
+    if (ok) {
+      let near = false;
+      for (const u of api.S.units) if (Math.abs(u.x - x) <= 5 && Math.abs(u.y - y) <= 5) near = true;
+      for (const c of api.S.cities) if (Math.abs(c.x - x) <= 5 && Math.abs(c.y - y) <= 5) near = true;
+      if (!near) genRun = [x, y];
+    }
+  }
+  check("general test strip found", genRun !== null);
+  if (genRun) {
+    const gen = api.spawn("gp_general", 0, genRun[0], genRun[1]);
+    const g1 = api.spawn("warrior", 0, genRun[0] + 1, genRun[1]);
+    const g2 = api.spawn("warrior", 0, genRun[0] + 2, genRun[1]);
+    const g3 = api.spawn("warrior", 0, genRun[0] + 3, genRun[1]);
+    const genR = api.useGreatPerson(gen.id);
+    check("general boosts troops within radius 2", genR.ok === true && g1.atkBonus === 1 && g2.atkBonus === 1 &&
+      (g3.atkBonus || 0) === 0 && !api.S.units.includes(gen));
+    const gen2 = api.spawn("gp_general", 0, genRun[0], genRun[1]);
+    api.S.units = [gen2];
+    const gen2R = api.useGreatPerson(gen2.id);
+    check("general refused without nearby troops", gen2R.ok === false &&
+      gen2R.reason.includes("рядом нет") && api.S.units.includes(gen2));
+  }
+  api.S.units = [];
+  api.S.players[0].gpRotate = 4;
+  api.S.players[0].gpPoints = api.S.players[0].gpNext;
+  api.processEconomy();
+  check("gp rotation length 5 wraps to general",
+    api.S.units.some((u) => u.type === "gp_general") && api.S.players[0].gpRotate === 0);
+
+  api.newGame(1, 3);
+  api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+  const absCity = api.S.cities[0];
+  api.S.players[0].techs.push("diplomacy");
+  absCity.producing = { k: "wonder", id: "worldcouncil" };
+  absCity.prodStored = 999;
+  api.processEconomy();
+  const absW = api.S.wonders.find((w) => w.id === "worldcouncil");
+  api.declareWar(0, 1);
+  api.S.players[0].stateReligion = "oracle";
+  api.S.players[2].stateReligion = "muses";
+  api.S.over = null;
+  api.S.turn = absW.turn + 15;
+  api.processElections();
+  const absEl = api.S.elections[0];
+  check("war and foreign state religion abstain", api.S.elections.length === 1 && absEl.votes === 2 &&
+    absEl.total === 4 && JSON.stringify(absEl.voters) === "[0,3]" && absEl.winner === 0);
+  check("no diplomacy win below 60 percent", api.S.over === null && absEl.won === false);
+  api.S.turn = absW.turn + 29;
+  api.processElections();
+  api.S.turn = absW.turn + 30;
+  api.processElections();
+  check("elections recur every 15 turns", api.S.elections.length === 2 &&
+    api.S.elections.every((e) => e.won === false) && api.S.over === null);
+
+  api.newGame(1);
+  api.save();
+  const rawS5 = JSON.parse(store["civ1_save"]);
+  delete rawS5.elections;
+  delete rawS5.resDeals;
+  delete rawS5.tributes;
+  delete rawS5.pendingTribute;
+  store["civ1_save"] = JSON.stringify(rawS5);
+  check("pre-S5 save migrates tribute deal and election state", api.load() === true &&
+    Array.isArray(api.S.elections) && api.S.elections.length === 0 &&
+    Array.isArray(api.S.resDeals) && api.S.resDeals.length === 0 &&
+    typeof api.S.tributes === "object" && Object.keys(api.S.tributes).length === 0 &&
+    api.S.pendingTribute === null);
+  let s5Err = null;
+  try { api.processDeals(); api.processElections(); api.S.over = null; api.endTurn(); } catch (e) { s5Err = e; }
+  check("migrated S5 state survives live turn", s5Err === null && api.S.turn === 2);
+}
+
 if (!mutation) {
   const expectFail = {
     a: "FAIL granary +2 food",
@@ -2226,8 +2551,11 @@ if (!mutation) {
     f: "FAIL trade blocked by cooldown",
     g: "FAIL city happiness formula",
     h: "FAIL farm adds food when worked",
+    i: "FAIL road speed doubles movement reach",
+    j: "FAIL declareWar annuls tribute and resource deals",
+    k: "FAIL diplomatic victory at 60 percent",
   };
-  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h"]) {
+  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]) {
     const r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     check(`mutation ${m} caught by tests`, r.status !== 0 && r.status !== null && (r.stdout || "").includes(expectFail[m]));
   }
