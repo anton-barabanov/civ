@@ -21,14 +21,18 @@ const UNITS = {
   caravel: { name: "Каравелла", letter: "К", icon: "🚢", atk: 5, def: 3, moves: 4, cost: 55, tech: "astronomy", naval: true, capacity: 3, upgrade: null },
   spearman: { name: "Копейщик", letter: "Ц", icon: "🔱", atk: 3, def: 5, moves: 1, cost: 40, tech: "bronze", upgrade: "musketman" },
   horseman: { name: "Всадник", letter: "Вс", icon: "🐎", atk: 5, def: 3, moves: 2, cost: 55, tech: "horsebackriding", res: ["horses"], upgrade: "knight" },
-  catapult: { name: "Катапульта", letter: "Т", icon: "💥", atk: 10, def: 2, moves: 1, cost: 70, tech: "machinery", upgrade: null },
+  catapult: { name: "Катапульта", letter: "Т", icon: "💥", atk: 10, def: 2, moves: 1, cost: 70, tech: "machinery", upgrade: "artillery" },
   crossbowman: { name: "Арбалетчик", letter: "Ар", icon: "🎯", atk: 6, def: 5, moves: 1, cost: 55, tech: "machinery", upgrade: null },
-  knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism", res: ["iron", "horses"], upgrade: null },
-  musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder", upgrade: null },
+  knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism", res: ["iron", "horses"], upgrade: "cavalry" },
+  musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder", upgrade: "rifleman" },
+  rifleman: { name: "Пехота", letter: "Пх", icon: "🪖", atk: 12, def: 10, moves: 1, cost: 120, tech: "electricity", res: ["iron"], upgrade: null },
+  cavalry: { name: "Кавалерия", letter: "Кв", icon: "🐎", atk: 14, def: 6, moves: 3, cost: 140, tech: "electricity", res: ["horses", "iron"], upgrade: null },
+  artillery: { name: "Артиллерия", letter: "Арт", icon: "💣", atk: 16, def: 4, moves: 1, cost: 150, tech: "chemistry", upgrade: null },
   gp_scientist: { name: "Учёный", letter: "У", icon: "🔬", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "scientist" },
   gp_engineer: { name: "Инженер", letter: "И", icon: "🔧", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "engineer" },
   gp_artist: { name: "Художник", letter: "Х", icon: "🎨", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "artist" },
   gp_prophet: { name: "Пророк", letter: "П", icon: "🙏", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "prophet" },
+  gp_general: { name: "Полководец", letter: "Пк", icon: "🎖️", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "general" },
 };
 
 const DIFFICULTIES = [
@@ -117,9 +121,10 @@ const GREAT_PEOPLE = {
   engineer: { name: "Инженер", icon: "🔧", desc: "+300 производства в город" },
   artist: { name: "Художник", icon: "🎨", desc: "+100 культуры в город" },
   prophet: { name: "Пророк", icon: "🙏", desc: "Основать религию или +50 золота" },
+  general: { name: "Полководец", icon: "🎖️", desc: "Собрать войско: +1 атаки всем своим юнитам в радиусе 2" },
 };
 
-const GP_ORDER = ["scientist", "engineer", "artist", "prophet"];
+const GP_ORDER = ["scientist", "engineer", "artist", "prophet", "general"];
 const GP_BASE_THRESHOLD = 30;
 
 const REL_SPREAD_RADIUS = 3;
@@ -1402,7 +1407,7 @@ function useGreatPerson(unitId) {
   if (!def.gp) return { ok: false, reason: "не великий человек" };
   const p = S.players[u.owner];
   const c = cityAt(u.x, u.y);
-  if (def.gp !== "scientist" && (!c || c.owner !== u.owner))
+  if (def.gp !== "scientist" && def.gp !== "general" && (!c || c.owner !== u.owner))
     return { ok: false, reason: "должен быть в своём городе" };
   if (def.gp === "scientist") {
     const t = grantFreeTech(p);
@@ -1423,6 +1428,11 @@ function useGreatPerson(unitId) {
       p.gold += 50;
       addLog(`${GREAT_PEOPLE.prophet.name} приносит 50🪙`);
     }
+  } else if (def.gp === "general") {
+    const troops = S.units.filter((o) => o.owner === u.owner && o !== u && !UNITS[o.type].gp && UNITS[o.type].atk > 0 && dist(u.x, u.y, o.x, o.y) <= 2);
+    if (!troops.length) return { ok: false, reason: "рядом нет своих войск" };
+    for (const o of troops) o.atkBonus = (o.atkBonus || 0) + 1;
+    addLog(`Великий полководец собирает войско: +1 атаки ${troops.length} юнитам`);
   }
   S.units = S.units.filter((x) => x !== u);
   if (S.sel === u.id) S.sel = null;
@@ -1482,7 +1492,7 @@ function aiTurnOne(owner) {
     if (!c.producing) {
       const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
       const myCities = S.cities.filter((x) => x.owner === owner).length;
-      const bestUnit = () => ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+      const bestUnit = () => ["rifleman", "cavalry", "artillery", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => unitAvailable(owner, t));
       const availWonders = Object.keys(WONDERS).filter((id) =>
         (!WONDERS[id].tech || p.techs.includes(WONDERS[id].tech)) &&
@@ -1522,7 +1532,7 @@ function aiTurnOne(owner) {
   const fighting = S.players.some((_, i) => i !== owner && atWar(owner, i));
   if (own.length) {
     if (fighting) {
-      const combat = ["musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+      const combat = ["rifleman", "cavalry", "artillery", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => unitAvailable(owner, t));
       if (combat) {
         const price = Math.ceil(UNITS[combat].cost * 3);
@@ -1552,6 +1562,23 @@ function aiTurnOne(owner) {
   for (const u of [...S.units]) {
     if (u.owner !== owner || !S.units.includes(u)) continue;
     if (UNITS[u.type].gp) {
+      if (UNITS[u.type].gp === "general") {
+        const troops = S.units.filter((o) => o.owner === owner && !UNITS[o.type].gp && UNITS[o.type].atk > 0);
+        const near = troops.filter((o) => dist(u.x, u.y, o.x, o.y) <= 2);
+        if (near.length) {
+          useGreatPerson(u.id);
+        } else if (troops.length) {
+          const tgt = troops.slice().sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y) || a.id - b.id)[0];
+          while (u.moves > 0 && (u.x !== tgt.x || u.y !== tgt.y)) {
+            const before = u.x + "," + u.y;
+            stepToward(u, tgt.x, tgt.y);
+            if (u.x + "," + u.y === before) break;
+          }
+        } else {
+          u.moves = 0;
+        }
+        continue;
+      }
       const home = S.cities.filter((c) => c.owner === owner)
         .sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y) || a.id - b.id)[0];
       if (home) {

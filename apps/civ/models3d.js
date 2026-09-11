@@ -255,6 +255,30 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     const gun = add(group, geo("u:musket", () => new THREE.BoxGeometry(0.52, 0.028, 0.028)), woodDark, 0, 0.42, 0.06);
     gun.rotation.z = 0.5;
     add(gun, geo("u:musketTip", () => new THREE.BoxGeometry(0.15, 0.022, 0.022)), metal, 0.3, 0, 0);
+  } else if (unitType === "rifleman") {
+    addFigure(group, om, 0.1, 0.38, 0, 0);
+    add(group, geo("u:helmR", () => new THREE.SphereGeometry(0.105, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2)), metal, 0, 0.46, 0);
+    const rifle = add(group, geo("u:rifle", () => new THREE.BoxGeometry(0.62, 0.026, 0.026)), woodDark, 0, 0.42, 0.06);
+    add(rifle, geo("u:rifleTip", () => new THREE.BoxGeometry(0.16, 0.02, 0.02)), metal, 0.31, 0, 0);
+    add(rifle, geo("u:bayonet", () => new THREE.ConeGeometry(0.009, 0.12, 4)), mat(C.snow), 0.55, 0, 0).rotation.z = -Math.PI / 2;
+  } else if (unitType === "cavalry") {
+    addHorse(group);
+    const rider = new THREE.Group();
+    rider.position.set(-0.02, 0.28, 0);
+    group.add(rider);
+    addFigure(rider, om, 0.08, 0.26, 0, 0);
+    add(rider, geo("u:capCav", () => new THREE.CylinderGeometry(0.07, 0.085, 0.05, 8)), mat(C.stoneDark), 0, 0.32, 0);
+    add(rider, geo("u:sabre", () => new THREE.TorusGeometry(0.1, 0.011, 6, 10, Math.PI * 0.75)), metal, 0.17, 0.2, 0.05);
+  } else if (unitType === "artillery") {
+    add(group, geo("u:artBase", () => new THREE.BoxGeometry(0.46, 0.07, 0.24)), wood, 0, 0.12, 0);
+    const wheelGeo = geo("u:wheel", () => new THREE.CylinderGeometry(0.08, 0.08, 0.024, 9));
+    add(group, wheelGeo, woodDark, 0.16, 0.08, 0.085).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, woodDark, 0.16, 0.08, -0.13).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, woodDark, -0.16, 0.08, 0.085).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, woodDark, -0.16, 0.08, -0.13).rotation.x = Math.PI / 2;
+    const barrel = add(group, geo("u:artBarrel", () => new THREE.CylinderGeometry(0.035, 0.045, 0.5, 8)), metal, 0.08, 0.22, 0);
+    barrel.rotation.z = Math.PI / 2 - 0.15;
+    add(group, geo("u:artBreech", () => new THREE.BoxGeometry(0.09, 0.09, 0.1)), mat(C.coal), -0.13, 0.19, 0);
   } else if (unitType === "worker") {
     addFigure(group, om, 0.09, 0.33, 0, 0);
     add(group, geo("u:hatW", () => new THREE.CylinderGeometry(0.1, 0.12, 0.05, 8)), mat(C.sail), 0, 0.42, 0);
@@ -295,6 +319,16 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     add(group, geo("u:gpTabletCap", () => new THREE.CylinderGeometry(0.0375, 0.0375, 0.02, 8)), mat(C.stone), 0.136, 0.345, 0.06).rotation.x = Math.PI / 2;
     add(group, geo("u:gpTablet", () => new THREE.BoxGeometry(0.075, 0.11, 0.02)), mat(C.stone), 0.21, 0.28, 0.06).rotation.z = -0.08;
     add(group, geo("u:gpTabletCap", () => new THREE.CylinderGeometry(0.0375, 0.0375, 0.02, 8)), mat(C.stone), 0.206, 0.335, 0.06).rotation.x = Math.PI / 2;
+  } else if (unitType === "gp_general") {
+    addHorse(group);
+    const rider = new THREE.Group();
+    rider.position.set(-0.02, 0.28, 0);
+    group.add(rider);
+    addFigure(rider, om, 0.085, 0.28, 0, 0);
+    add(rider, geo("u:genCap", () => new THREE.CylinderGeometry(0.07, 0.085, 0.045, 8)), mat(C.stoneDark), 0, 0.34, 0);
+    add(group, geo("u:genPole", () => new THREE.CylinderGeometry(0.011, 0.011, 0.62, 5)), woodDark, -0.2, 0.31, 0.02);
+    add(group, geo("u:genFlag", () => new THREE.BoxGeometry(0.16, 0.1, 0.012)), om, -0.11, 0.55, 0.02);
+    add(group, geo("u:genFinial", () => new THREE.SphereGeometry(0.02, 6, 5)), mat(C.gold), -0.2, 0.63, 0.02);
   } else if (unitType === "galley") {
     add(group, geo("u:hullG", () => new THREE.BoxGeometry(0.56, 0.1, 0.2)), wood, 0, 0.08, 0);
     add(group, geo("u:bowG", () => new THREE.ConeGeometry(0.09, 0.16, 4)), wood, 0.35, 0.08, 0).rotation.z = -Math.PI / 2;

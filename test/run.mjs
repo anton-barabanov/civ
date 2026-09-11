@@ -1575,9 +1575,10 @@ if (!upCoast) {
   check("upgrade chains declared", UT.warrior.upgrade === "swordsman" && UT.swordsman.upgrade === "musketman" &&
     UT.archer.upgrade === "crossbowman" && UT.spearman.upgrade === "musketman" &&
     UT.horseman.upgrade === "knight" && UT.galley.upgrade === "caravel" &&
-    UT.settler.upgrade === null && UT.scout.upgrade === null && UT.catapult.upgrade === null &&
-    UT.crossbowman.upgrade === null && UT.knight.upgrade === null && UT.musketman.upgrade === null &&
-    UT.caravel.upgrade === null);
+    UT.settler.upgrade === null && UT.scout.upgrade === null && UT.catapult.upgrade === "artillery" &&
+    UT.crossbowman.upgrade === null && UT.knight.upgrade === "cavalry" && UT.musketman.upgrade === "rifleman" &&
+    UT.caravel.upgrade === null && UT.rifleman.upgrade === null && UT.cavalry.upgrade === null &&
+    UT.artillery.upgrade === null);
   let upCyc = false;
   for (const id in UT) {
     let cur = id, steps = 0;
@@ -1592,7 +1593,7 @@ if (!upCoast) {
   check("upgradeCost formula max(10, 2x diff)", api.upgradeCost({ type: "warrior" }) === 50 &&
     api.upgradeCost({ type: "swordsman" }) === 110 && api.upgradeCost({ type: "archer" }) === 40 &&
     api.upgradeCost({ type: "spearman" }) === 120 && api.upgradeCost({ type: "horseman" }) === 60 &&
-    api.upgradeCost({ type: "galley" }) === 40 && api.upgradeCost({ type: "musketman" }) === 0);
+    api.upgradeCost({ type: "galley" }) === 40 && api.upgradeCost({ type: "musketman" }) === 40);
   check("debugApi exposes upgrade functions", typeof api.upgradeUnit === "function" && typeof api.upgradeCost === "function");
 
   const upW = api.spawn("warrior", 0, upCity.x, upCity.y);
@@ -1706,9 +1707,9 @@ check("great people unit data", ["gp_scientist", "gp_engineer", "gp_artist", "gp
   return d && d.gp && d.atk === 0 && d.def === 1 && d.moves === 2 && d.cost === 0 &&
     d.tech === null && d.upgrade === null && !!d.icon && !!d.letter;
 }));
-check("GREAT_PEOPLE table exposed", !!api.GREAT_PEOPLE && ["scientist", "engineer", "artist", "prophet"].every((k) =>
+check("GREAT_PEOPLE table exposed", !!api.GREAT_PEOPLE && ["scientist", "engineer", "artist", "prophet", "general"].every((k) =>
   api.GREAT_PEOPLE[k] && api.GREAT_PEOPLE[k].name && api.GREAT_PEOPLE[k].icon && api.GREAT_PEOPLE[k].desc) &&
-  JSON.stringify(api.GP_ORDER) === '["scientist","engineer","artist","prophet"]');
+  JSON.stringify(api.GP_ORDER) === '["scientist","engineer","artist","prophet","general"]');
 
 const gpAppSrc = readFileSync("apps/civ/app.js", "utf8");
 check("GP filtered from production list, action button in panel",
@@ -1766,11 +1767,12 @@ api.processEconomy();
 const gpBorn0 = api.S.units.filter((u) => UT[u.type].gp).length;
 api.S.players[0].gpPoints = 999;
 api.processEconomy();
-check("round-robin scientist-engineer-artist-prophet-scientist",
-  api.S.units.filter((u) => u.type === "gp_scientist").length === 2 &&
+check("round-robin scientist-engineer-artist-prophet-general",
+  api.S.units.filter((u) => u.type === "gp_scientist").length === 1 &&
   api.S.units.filter((u) => u.type === "gp_engineer").length === 1 &&
   api.S.units.filter((u) => u.type === "gp_artist").length === 1 &&
-  api.S.units.filter((u) => u.type === "gp_prophet").length === 1);
+  api.S.units.filter((u) => u.type === "gp_prophet").length === 1 &&
+  api.S.units.filter((u) => u.type === "gp_general").length === 1);
 check("at most one GP birth per player per turn", api.S.units.filter((u) => UT[u.type].gp).length === gpBorn0 + 1);
 
 api.S.units = api.S.units.filter((u) => !UT[u.type].gp);

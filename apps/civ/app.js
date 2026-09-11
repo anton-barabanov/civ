@@ -209,7 +209,7 @@ function renderPanel() {
     const stackInfo = stack.length > 1 ? ` <span class="civ-terr">Юнит ${stack.findIndex((x) => x.id === sel.id) + 1} из ${stack.length}</span>` : "";
     body = `
       <div class="civ-unit">
-        <b>${u.name}</b> · ⚔${u.atk} 🛡${u.def} · ходов: ${sel.moves}${stackInfo}
+        <b>${u.name}</b> · ⚔${u.atk}${sel.atkBonus ? "+" + sel.atkBonus : ""} 🛡${u.def} · ходов: ${sel.moves}${stackInfo}
         <span class="civ-terr">${t.name}${t.def ? ` (+${t.def}% защ.)` : ""}</span>
       </div>`;
     if (sel.type === "settler" && !cityAt(sel.x, sel.y) && TERRAIN[S.map[key(sel.x, sel.y)]].passable) {
@@ -258,7 +258,7 @@ function renderPanel() {
     if (u.gp) {
       const gpDef = GREAT_PEOPLE[u.gp];
       const inOwnCity = ownCity && ownCity.owner === 0;
-      const gpBlocked = u.gp !== "scientist" && !inOwnCity;
+      const gpBlocked = u.gp !== "scientist" && u.gp !== "general" && !inOwnCity;
       body += `<button class="btn primary" id="civ-gp" ${gpBlocked ? `disabled title="Великий человек должен быть в своём городе"` : `title="${gpDef.desc}"`}>✨ ${gpDef.desc}</button>`;
     }
     const upTo = u.upgrade ? UNITS[u.upgrade] : null;
