@@ -345,6 +345,25 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     add(group, geo("u:sailC1", () => new THREE.PlaneGeometry(0.32, 0.3)), mat(C.sail, THREE.DoubleSide), 0.08, 0.42, 0).rotation.y = Math.PI / 2;
     add(group, geo("u:sailC2", () => new THREE.PlaneGeometry(0.24, 0.26)), mat(C.sail, THREE.DoubleSide), -0.07, 0.35, 0).rotation.y = Math.PI / 2;
     add(group, geo("u:flagC", () => new THREE.BoxGeometry(0.09, 0.055, 0.012)), om, 0.125, 0.66, 0);
+  } else if (unitType === "zeppelin") {
+    const hull = add(group, geo("u:zepHull", () => new THREE.SphereGeometry(0.28, 12, 9)), om, 0, 0.46, 0);
+    hull.scale.set(1.45, 1, 1);
+    add(group, geo("u:zepGondola", () => new THREE.BoxGeometry(0.16, 0.06, 0.08)), woodDark, 0, 0.17, 0);
+    add(group, geo("u:zepMastF", () => new THREE.BoxGeometry(0.016, 0.06, 0.016)), woodDark, 0.05, 0.26, 0);
+    add(group, geo("u:zepMastR", () => new THREE.BoxGeometry(0.016, 0.06, 0.016)), woodDark, -0.05, 0.26, 0);
+    add(group, geo("u:zepFinV", () => new THREE.BoxGeometry(0.16, 0.18, 0.02)), om, -0.36, 0.52, 0);
+    add(group, geo("u:zepFinH", () => new THREE.BoxGeometry(0.16, 0.02, 0.18)), om, -0.36, 0.46, 0);
+  } else if (unitType === "bomber") {
+    add(group, geo("u:bombFus", () => new THREE.BoxGeometry(0.5, 0.09, 0.1)), om, 0, 0.3, 0);
+    add(group, geo("u:bombNose", () => new THREE.ConeGeometry(0.055, 0.12, 6)), metal, 0.3, 0.3, 0).rotation.z = -Math.PI / 2;
+    add(group, geo("u:bombTail", () => new THREE.BoxGeometry(0.02, 0.16, 0.02)), om, -0.24, 0.38, 0);
+    add(group, geo("u:bombTailW", () => new THREE.BoxGeometry(0.02, 0.012, 0.22)), om, -0.24, 0.32, 0);
+    add(group, geo("u:bombWingT", () => new THREE.BoxGeometry(0.16, 0.012, 0.72)), om, 0, 0.44, 0);
+    add(group, geo("u:bombWingB", () => new THREE.BoxGeometry(0.16, 0.012, 0.56)), om, 0, 0.2, 0);
+    const strutGeo = geo("u:bombStrut", () => new THREE.CylinderGeometry(0.008, 0.008, 0.24, 5));
+    add(group, strutGeo, woodDark, 0, 0.32, 0.24);
+    add(group, strutGeo, woodDark, 0, 0.32, -0.24);
+    add(group, geo("u:bombProp", () => new THREE.BoxGeometry(0.012, 0.28, 0.03)), woodDark, 0.37, 0.3, 0).rotation.x = 0.5;
   } else {
     addFigure(group, om, 0.09, 0.35, 0, 0);
   }

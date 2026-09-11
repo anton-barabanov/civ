@@ -28,6 +28,8 @@ const UNITS = {
   rifleman: { name: "Пехота", letter: "Пх", icon: "🪖", atk: 12, def: 10, moves: 1, cost: 120, tech: "electricity", res: ["iron"], upgrade: null },
   cavalry: { name: "Кавалерия", letter: "Кв", icon: "🐎", atk: 14, def: 6, moves: 3, cost: 140, tech: "electricity", res: ["horses", "iron"], upgrade: null },
   artillery: { name: "Артиллерия", letter: "Арт", icon: "💣", atk: 16, def: 4, moves: 1, cost: 150, tech: "chemistry", upgrade: null },
+  zeppelin: { name: "Дирижабль", letter: "Др", icon: "🎈", atk: 0, def: 1, moves: 4, cost: 90, tech: "flight", air: true, recon: 3, upgrade: null },
+  bomber: { name: "Бомбардировщик", letter: "Бм", icon: "✈️", atk: 8, def: 3, moves: 4, cost: 100, tech: "flight", air: true, upgrade: null },
   gp_scientist: { name: "Учёный", letter: "У", icon: "🔬", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "scientist" },
   gp_engineer: { name: "Инженер", letter: "И", icon: "🔧", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "engineer" },
   gp_artist: { name: "Художник", letter: "Х", icon: "🎨", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "artist" },
@@ -103,6 +105,7 @@ const TECHS = {
   electricity: { name: "Электричество", cost: 230, req: ["chemistry"] },
   rocketry: { name: "Ракетостроение", cost: 300, req: ["electricity"] },
   democracy: { name: "Демократия", cost: 160, req: ["banking", "education"] },
+  flight: { name: "Полёт", cost: 260, req: ["electricity"] },
 };
 
 const RELIGIONS = {
@@ -179,6 +182,8 @@ function unitById(id) { return S.units.find((u) => u.id === id) || null; }
 
 function isNaval(u) { return !!UNITS[u.type].naval; }
 
+function isAir(u) { return !!UNITS[u.type].air; }
+
 function shipAt(x, y, owner) {
   return unitsAt(x, y).find((o) => isNaval(o) && o.owner === owner) || null;
 }
@@ -188,6 +193,7 @@ function cargoCount(x, y) {
 }
 
 function canEnter(u, x, y) {
+  if (UNITS[u.type].air) return true;
   const t = S.map[key(x, y)];
   if (isNaval(u)) return t === TILE.OCEAN;
   if (t === TILE.OCEAN) {
@@ -587,7 +593,7 @@ function computeVision() {
       for (let x = x0; x <= x1; x++) ex[base + x] = 1;
     }
   };
-  for (const u of S.units) mark(u.x, u.y, u.owner, 2);
+  for (const u of S.units) mark(u.x, u.y, u.owner, 2 + (UNITS[u.type].recon || 0));
   for (const c of S.cities) mark(c.x, c.y, c.owner, 2);
   if (S.tileOwner) {
     for (let i = 0; i < W * H; i++) {
@@ -650,7 +656,7 @@ function moveUnit(u, x, y) {
   for (const p of cargo) { p.x = x; p.y = y; }
   computeVision();
   const c = cityAt(x, y);
-  if (c && c.owner !== u.owner && atWar(u.owner, c.owner) && !unitsAt(x, y).some((o) => o.owner === c.owner)) {
+  if (c && c.owner !== u.owner && atWar(u.owner, c.owner) && !UNITS[u.type].air && !unitsAt(x, y).some((o) => o.owner === c.owner)) {
     captureCity(c, u.owner);
   }
 }
@@ -669,6 +675,7 @@ function captureCity(c, owner) {
 
 function attack(att, x, y) {
   if (UNITS[att.type].gp) return;
+  if (UNITS[att.type].air) return;
   const defs = unitsAt(x, y).filter((u) => u.owner !== att.owner);
   const city = cityAt(x, y);
   const def = defs[0];
@@ -711,10 +718,49 @@ function attack(att, x, y) {
   checkVictory();
 }
 
+function bombard(unitId, x, y) {
+  const u = unitById(unitId);
+  if (!u) return { ok: false, reason: "юнит не найден" };
+  if (u.type !== "bomber") return { ok: false, reason: "это не бомбардировщик" };
+  if (u.moves <= 0) return { ok: false, reason: "нет ходов" };
+  if (dist(u.x, u.y, x, y) > 2) return { ok: false, reason: "цель вне радиуса 2" };
+  const def = unitsAt(x, y).find((o) => o.owner !== u.owner) || null;
+  const city = cityAt(x, y);
+  const foe = def ? def.owner : (city && city.owner !== u.owner ? city.owner : null);
+  if (foe === null) return { ok: false, reason: "нет вражеской цели" };
+  if (!atWar(u.owner, foe)) return { ok: false, reason: `Мы не воюем с ${S.players[foe].name}` };
+  u.moves = 0;
+  if (def) {
+    const A = UNITS[u.type].atk + (u.atkBonus || 0);
+    let D = UNITS[def.type].def;
+    const t = S.map[key(x, y)];
+    D *= 1 + TERRAIN[t].def / 100;
+    if (!isNaval(def) && t === TILE.OCEAN) D *= 0.5;
+    if (city) {
+      D *= 1.25;
+      D *= buildingEffects(city).defMult * playerEffects(city.owner).defMult;
+    }
+    const r = A / D;
+    const p = Math.min(0.95, Math.max(0.05, r / (r + 1)));
+    if (Math.random() < p) {
+      S.units = S.units.filter((o) => o !== def);
+      addLog(`Бомбардировка: ${UNITS[u.type].name} уничтожил ${UNITS[def.type].name} (${Math.round(p * 100)}% шанс)`);
+    } else {
+      addLog(`Бомбардировка по ${UNITS[def.type].name} прошла мимо (${Math.round((1 - p) * 100)}% промах)`);
+    }
+  } else {
+    city.pop = Math.max(1, city.pop - 1);
+    addLog(`Бомбардировка ${city.name}: −1 население`);
+  }
+  checkVictory();
+  return { ok: true };
+}
+
 function drownCheck() {
   let dead = 0;
   for (const u of [...S.units]) {
     if (isNaval(u)) continue;
+    if (isAir(u)) continue;
     if (S.map[key(u.x, u.y)] !== TILE.OCEAN) continue;
     if (shipAt(u.x, u.y, u.owner)) continue;
     S.units = S.units.filter((x) => x !== u);
@@ -1531,7 +1577,7 @@ function aiTurnOne(owner) {
     if (!c.producing) {
       const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
       const myCities = S.cities.filter((x) => x.owner === owner).length;
-      const bestUnit = () => ["rifleman", "cavalry", "artillery", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+      const bestUnit = () => ["rifleman", "cavalry", "artillery", "bomber", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => unitAvailable(owner, t));
       const availWonders = Object.keys(WONDERS).filter((id) =>
         (!WONDERS[id].tech || p.techs.includes(WONDERS[id].tech)) &&
@@ -1571,7 +1617,7 @@ function aiTurnOne(owner) {
   const fighting = S.players.some((_, i) => i !== owner && atWar(owner, i));
   if (own.length) {
     if (fighting) {
-      const combat = ["rifleman", "cavalry", "artillery", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+      const combat = ["rifleman", "cavalry", "artillery", "bomber", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => unitAvailable(owner, t));
       if (combat) {
         const price = Math.ceil(UNITS[combat].cost * 3);
@@ -1600,6 +1646,64 @@ function aiTurnOne(owner) {
   }
   for (const u of [...S.units]) {
     if (u.owner !== owner || !S.units.includes(u)) continue;
+    if (isAir(u)) {
+      if (u.type === "zeppelin") {
+        let tgt = null;
+        let bd = Infinity;
+        for (let i = 0; i < W * H; i++) {
+          if (exploredOf(owner)[i]) continue;
+          const d = dist(u.x, u.y, i % W, (i / W) | 0);
+          if (d < bd) { bd = d; tgt = [i % W, (i / W) | 0]; }
+        }
+        if (tgt) {
+          while (u.moves > 0 && (u.x !== tgt[0] || u.y !== tgt[1])) {
+            const before = u.x + "," + u.y;
+            stepToward(u, tgt[0], tgt[1]);
+            if (u.x + "," + u.y === before) break;
+          }
+        } else {
+          u.moves = 0;
+        }
+        continue;
+      }
+      if (fighting) {
+        let bombed = false;
+        while (u.moves > 0 && !bombed) {
+          let tgt = null;
+          for (const e of S.units) {
+            if (e.owner === owner || !atWar(owner, e.owner)) continue;
+            const d = dist(u.x, u.y, e.x, e.y);
+            if (d > 2) continue;
+            if (!tgt || d < tgt.d || (d === tgt.d && e.id < tgt.id)) tgt = { d, id: e.id, x: e.x, y: e.y };
+          }
+          for (const c of S.cities) {
+            if (c.owner === owner || !atWar(owner, c.owner)) continue;
+            const d = dist(u.x, u.y, c.x, c.y);
+            if (d > 2) continue;
+            if (!tgt || d < tgt.d || (d === tgt.d && c.id < tgt.id)) tgt = { d, id: c.id, x: c.x, y: c.y };
+          }
+          if (tgt) {
+            bombard(u.id, tgt.x, tgt.y);
+            bombed = true;
+            break;
+          }
+          let city = null;
+          let bd = Infinity;
+          for (const c of S.cities) {
+            if (c.owner === owner || !atWar(owner, c.owner)) continue;
+            const d = dist(u.x, u.y, c.x, c.y);
+            if (d < bd || (d === bd && city && c.id < city.id)) { bd = d; city = c; }
+          }
+          if (!city) { u.moves = 0; break; }
+          const before = u.x + "," + u.y;
+          stepToward(u, city.x, city.y);
+          if (u.x + "," + u.y === before) break;
+        }
+      } else {
+        u.moves = 0;
+      }
+      continue;
+    }
     if (UNITS[u.type].gp) {
       if (UNITS[u.type].gp === "general") {
         const troops = S.units.filter((o) => o.owner === owner && !UNITS[o.type].gp && UNITS[o.type].atk > 0);
@@ -2350,8 +2454,8 @@ export function getVisible() { return visible; }
 export {
   TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, SS_PARTS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, GOVERNMENTS, RESOURCES, W, H, TS, SAVE_KEY,
   CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD, GREAT_PEOPLE, GP_ORDER,
-  key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal,
-  newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, foundCity, drownCheck, nextInStack,
+  key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal, isAir,
+  newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, bombard, foundCity, drownCheck, nextInStack,
   cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
   spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections, processGovernments, startRevolution,
@@ -2436,6 +2540,8 @@ export function debugApi() {
     reachable,
     canEnter,
     isNaval,
+    isAir,
+    bombard,
     tradeActive,
     landTradeActive,
     roadDoneAt,

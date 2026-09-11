@@ -322,7 +322,7 @@ export async function createRenderer3D(container, handlers) {
         ring.visible = false;
         holder.add(ring);
         overlayRoot.add(holder);
-        e = { holder, mesh: null, ring, type: null, owner: -1, lastX: NaN, lastZ: NaN, baseY: 0, animT: 1, spawnT: 0, tx: NaN, ty: NaN, kick: null };
+        e = { holder, mesh: null, ring, type: null, owner: -1, lastX: NaN, lastZ: NaN, baseY: 0, air: false, animT: 1, spawnT: 0, tx: NaN, ty: NaN, kick: null };
         unitHolders.set(u.id, e);
       }
       if (e.type !== u.type || e.owner !== u.owner) {
@@ -344,7 +344,8 @@ export async function createRenderer3D(container, handlers) {
         e.lastZ = pz;
         e.animT = 0;
       }
-      e.baseY = water ? -0.03 : 0;
+      e.baseY = u.air ? 0.45 : (water ? -0.03 : 0);
+      e.air = !!u.air;
       e.tx = u.x;
       e.ty = u.y;
       e.holder.position.set(px, e.baseY, pz);
@@ -540,6 +541,10 @@ export async function createRenderer3D(container, handlers) {
         e.spawnT += dt;
         e.holder.scale.setScalar(e.spawnT < 0.3 ? 0.05 + 0.95 * (e.spawnT / 0.3) : 1);
       }
+    }
+    for (const [id, e] of unitHolders) {
+      if (!e.air || e.animT < 0.3) continue;
+      e.holder.position.y = e.baseY + 0.04 * Math.sin(t * 1.8 + id % 5);
     }
     for (const e of cityHolders.values()) {
       if (e.spawnT < 0.3) {

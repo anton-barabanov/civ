@@ -1,6 +1,6 @@
 import {
   TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, W, H,
-  key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack,
+  key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack, bombard,
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
@@ -74,7 +74,7 @@ function buildViewModel() {
     }));
   const units = S.units
     .filter((u) => (u.owner === 0 || visible[key(u.x, u.y)]) && explored[key(u.x, u.y)])
-    .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === 0 && u.moves > 0, icon: UNITS[u.type].icon }));
+    .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === 0 && u.moves > 0, icon: UNITS[u.type].icon, air: !!UNITS[u.type].air }));
   return {
     W,
     H,
@@ -87,11 +87,23 @@ function buildViewModel() {
   };
 }
 
+let bombMode = false;
+
 function onTileClick(x, y) {
   const S = getState();
   if (S.over) { refresh(); return; }
   if (!inMap(x, y) || !S.players[0].explored[key(x, y)]) return;
   const sel = S.sel ? unitById(S.sel) : null;
+  if (!(sel && sel.owner === 0 && sel.type === "bomber" && sel.moves > 0)) bombMode = false;
+  if (bombMode && sel && sel.owner === 0 && sel.type === "bomber") {
+    const c = cityAt(x, y);
+    const foe = unitsAt(x, y).some((u) => u.owner !== 0) || (c && c.owner !== 0);
+    if (foe && Math.max(Math.abs(sel.x - x), Math.abs(sel.y - y)) <= 2) bombard(sel.id, x, y);
+    bombMode = false;
+    save();
+    refresh();
+    return;
+  }
   if (sel && sel.owner === 0) {
     if (sel.x === x && sel.y === y) { S.sel = null; refresh(); return; }
     const reach = reachable(sel);
@@ -118,6 +130,7 @@ function onTileClick(x, y) {
 }
 
 function onTileRightClick() {
+  bombMode = false;
   getState().sel = null;
   refresh();
 }
@@ -229,6 +242,9 @@ function renderPanel() {
       else if (mCity.owner !== 0 && atWar(0, mCity.owner)) why = "В военное время вера не распространяется";
       body += `<button class="btn primary" id="civ-spread" ${why ? `disabled title="${why}"` : ""}>🕯 Распространить веру</button>`;
     }
+    if (sel.type === "bomber") {
+      body += `<button class="btn primary" id="civ-bomb" ${sel.moves <= 0 ? "disabled" : `title="выберите вражескую цель в радиусе 2"`}>${bombMode ? "💣 Выбор цели… (клик мимо — отмена)" : "💣 Бомбардировать (радиус 2)"}</button>`;
+    }
     const ownCity = cityAt(sel.x, sel.y);
     if (ownCity && ownCity.owner === 0) {
       body += `<button class="btn text" id="civ-city">🏛 Открыть город</button>`;
@@ -314,6 +330,12 @@ function renderPanel() {
   if (sp) sp.onclick = () => {
     const u = unitById(getState().sel);
     if (u && spreadFaith(u.id).ok) { save(); refresh(); }
+  };
+  const bb = document.getElementById("civ-bomb");
+  if (bb) bb.onclick = () => {
+    const u = unitById(getState().sel);
+    bombMode = !bombMode && !!u && u.type === "bomber" && u.moves > 0;
+    refresh();
   };
 }
 
