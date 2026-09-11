@@ -582,29 +582,41 @@ function computeVision() {
   }
 }
 
+function roadDoneAt(k) {
+  const im = S.impr && S.impr[k];
+  return !!(im && im.kind === "road" && !im.left);
+}
+
 function reachable(u) {
-  const budget = u.moves;
+  const budget = u.moves * 2;
   const res = new Map();
-  const q = [[u.x, u.y, budget]];
+  const buckets = [];
+  for (let i = 0; i <= budget; i++) buckets.push([]);
+  buckets[budget].push([u.x, u.y]);
   const seen = new Set([key(u.x, u.y)]);
-  while (q.length) {
-    const [x, y, m] = q.shift();
-    if (m <= 0) continue;
-    for (const [nx, ny] of neighbors(x, y)) {
-      const k = key(nx, ny);
-      if (seen.has(k)) continue;
-      if (!canEnter(u, nx, ny)) continue;
-      const other = unitsAt(nx, ny).find((o) => o.owner !== u.owner) || null;
-      const city = cityAt(nx, ny);
-      const foe = other ? other.owner : (city && city.owner !== u.owner ? city.owner : null);
-      if (foe !== null) {
-        if (atWar(u.owner, foe)) res.set(k, 0);
-        else if (u.type === "missionary" && !other && city) res.set(k, m - 1);
-        continue;
+  for (let m = budget; m > 0; m--) {
+    const bq = buckets[m];
+    while (bq.length) {
+      const [x, y] = bq.shift();
+      const fromRoad = roadDoneAt(key(x, y));
+      for (const [nx, ny] of neighbors(x, y)) {
+        const k = key(nx, ny);
+        if (seen.has(k)) continue;
+        if (!canEnter(u, nx, ny)) continue;
+        const cost = fromRoad && roadDoneAt(k) ? 1 : 2;
+        const other = unitsAt(nx, ny).find((o) => o.owner !== u.owner) || null;
+        const city = cityAt(nx, ny);
+        const foe = other ? other.owner : (city && city.owner !== u.owner ? city.owner : null);
+        if (foe !== null) {
+          if (atWar(u.owner, foe)) res.set(k, 0);
+          else if (u.type === "missionary" && !other && city && m >= cost) res.set(k, m - cost);
+          continue;
+        }
+        if (m < cost) continue;
+        seen.add(k);
+        res.set(k, m - cost);
+        buckets[m - cost].push([nx, ny]);
       }
-      seen.add(k);
-      res.set(k, m - 1);
-      q.push([nx, ny, m - 1]);
     }
   }
   res.delete(key(u.x, u.y));
@@ -749,7 +761,7 @@ function startImprovement(unitId, kind) {
   if (!u) return { ok: false, reason: "юнит не найден" };
   if (u.type !== "worker") return { ok: false, reason: "это не рабочий" };
   if (u.work) return { ok: false, reason: "рабочий уже занят" };
-  if (kind !== "farm" && kind !== "mine") return { ok: false, reason: "неизвестное улучшение" };
+  if (kind !== "farm" && kind !== "mine" && kind !== "road") return { ok: false, reason: "неизвестное улучшение" };
   if (u.moves <= 0) return { ok: false, reason: "нет ходов" };
   const k = key(u.x, u.y);
   if (cityAt(u.x, u.y)) return { ok: false, reason: "под городом улучшений нет" };
@@ -759,9 +771,12 @@ function startImprovement(unitId, kind) {
     return { ok: false, reason: "ферма строится на лугах или равнине" };
   if (kind === "mine" && t !== TILE.HILLS)
     return { ok: false, reason: "шахта строится на холмах" };
+  if (kind === "road" && (t === TILE.OCEAN || !TERRAIN[t].passable))
+    return { ok: false, reason: "дорога строится на проходимой суше" };
   if (S.impr[k]) return { ok: false, reason: "улучшение уже есть" };
-  u.work = { kind, left: 3 };
-  S.impr[k] = { kind, left: 3 };
+  const left = kind === "road" ? 2 : 3;
+  u.work = { kind, left };
+  S.impr[k] = { kind, left };
   u.moves = 0;
   return { ok: true };
 }
@@ -818,6 +833,32 @@ function tradeActive(c) {
     o.owner === c.owner && o.id !== c.id &&
     waterAdjKeys(o.x, o.y).some((k) => ids.has(S.waterComp[k]))
   );
+}
+
+function landTradeActive(c) {
+  if (!S.tileOwner) return false;
+  if (!S.cities.some((o) => o.owner === c.owner && o.id !== c.id)) return false;
+  const seen = new Set();
+  const q = [];
+  for (const [nx, ny] of neighbors(c.x, c.y)) {
+    const k = key(nx, ny);
+    if (S.tileOwner[k] !== c.owner || !TERRAIN[S.map[k]].passable || !roadDoneAt(k)) continue;
+    seen.add(k);
+    q.push([nx, ny]);
+  }
+  while (q.length) {
+    const [x, y] = q.shift();
+    for (const [nx, ny] of neighbors(x, y)) {
+      const oc = cityAt(nx, ny);
+      if (oc && oc.owner === c.owner && oc.id !== c.id) return true;
+      const k = key(nx, ny);
+      if (seen.has(k)) continue;
+      if (S.tileOwner[k] !== c.owner || !TERRAIN[S.map[k]].passable || !roadDoneAt(k)) continue;
+      seen.add(k);
+      q.push([nx, ny]);
+    }
+  }
+  return false;
 }
 
 function buildingEffects(c) {
@@ -985,10 +1026,11 @@ function cityYields(c) {
   let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat + (isHolyCity(c) ? 2 : 0);
   sci = Math.round(sci * e.sciMult * pe.sciMult);
   const trade = tradeActive(c);
-  const tradeGold = trade ? 2 * e.tradeMult * pe.tradeMult : 0;
+  const land = !trade && landTradeActive(c);
+  const tradeGold = trade ? 2 * e.tradeMult * pe.tradeMult : land ? 1 : 0;
   const holyGold = (S.players[c.owner].stateReligion === c.religion && isHolyCity(c)) ? 2 : 0;
   const gold = 3 + Math.floor(c.pop / 2) + tradeGold + holyGold;
-  return { food, prod, sci, gold, trade, tradeGold };
+  return { food, prod, sci, gold, trade: trade || land, tradeGold };
 }
 
 function playerGoldPerTurn(i) {
@@ -1074,7 +1116,7 @@ function processWork() {
     u.work.left--;
     if (u.work.left <= 0) {
       S.impr[k] = { kind: u.work.kind };
-      const nm = u.work.kind === "farm" ? "ферма" : "шахта";
+      const nm = u.work.kind === "farm" ? "ферма" : u.work.kind === "mine" ? "шахта" : "дорога";
       u.work = null;
       addLog(u.owner === 0 ? `Построено улучшение: ${nm}` : `${S.players[u.owner].name}: построено улучшение — ${nm}`);
     } else {
@@ -1524,6 +1566,7 @@ function aiTurnOne(owner) {
     }
     if (u.type === "worker") {
       if (u.work) { u.moves = 0; continue; }
+      const roadCells = !fighting && myCities.length >= 2 ? aiRoadCells(owner) : null;
       const comp = landCompOf(u.x, u.y);
       let best = null, bestPrio = 0, bestD = 0, bestK = -1;
       for (let i = 0; i < W * H; i++) {
@@ -1531,9 +1574,11 @@ function aiTurnOne(owner) {
         const x = i % W, y = (i / W) | 0;
         if (cityAt(x, y)) continue;
         const t = S.map[i];
-        const kind = t === TILE.HILLS ? "mine" : (t === TILE.GRASS || t === TILE.PLAINS) ? "farm" : null;
+        const kind = roadCells && roadCells.has(i) ? "road"
+          : t === TILE.HILLS ? "mine"
+          : (t === TILE.GRASS || t === TILE.PLAINS) ? "farm" : null;
         if (!kind) continue;
-        const prio = kind === "mine" ? 2 : 1;
+        const prio = kind === "road" ? 3 : kind === "mine" ? 2 : 1;
         const d = dist(u.x, u.y, x, y);
         if (!best || prio > bestPrio || (prio === bestPrio && (d < bestD || (d === bestD && i < bestK)))) {
           best = { x, y, kind };
@@ -1671,6 +1716,56 @@ function landCompOf(x, y) {
     }
   }
   return seen;
+}
+
+function aiRoadCells(owner) {
+  const cities = S.cities.filter((c) => c.owner === owner).sort((a, b) => a.id - b.id);
+  let a = null, b = null, pd = Infinity;
+  for (let i = 0; i < cities.length; i++)
+    for (let j = i + 1; j < cities.length; j++) {
+      const d = dist(cities[i].x, cities[i].y, cities[j].x, cities[j].y);
+      if (d < pd || (d === pd && a && (cities[i].id < a.id || (cities[i].id === a.id && cities[j].id < b.id)))) {
+        pd = d;
+        a = cities[i];
+        b = cities[j];
+      }
+    }
+  const cells = new Set();
+  if (!a) return cells;
+  const ok = (x, y) => {
+    if (!inMap(x, y)) return false;
+    const k = key(x, y);
+    return S.tileOwner[k] === owner && TERRAIN[S.map[k]].passable && !cityAt(x, y) &&
+      (!S.impr[k] || roadDoneAt(k));
+  };
+  const goal = new Set();
+  for (const [nx, ny] of neighbors(b.x, b.y)) if (ok(nx, ny)) goal.add(key(nx, ny));
+  const par = new Map();
+  const q = [];
+  let meet = -1;
+  for (const [nx, ny] of neighbors(a.x, a.y)) {
+    if (!ok(nx, ny)) continue;
+    const k = key(nx, ny);
+    if (par.has(k)) continue;
+    par.set(k, -1);
+    q.push(k);
+    if (goal.has(k) && meet === -1) meet = k;
+  }
+  for (let qi = 0; qi < q.length && meet === -1; qi++) {
+    const k = q[qi];
+    const x = k % W, y = (k / W) | 0;
+    for (const [nx, ny] of neighbors(x, y)) {
+      if (!ok(nx, ny)) continue;
+      const nk = key(nx, ny);
+      if (par.has(nk)) continue;
+      par.set(nk, k);
+      q.push(nk);
+      if (goal.has(nk)) { meet = nk; break; }
+    }
+  }
+  if (meet === -1) return cells;
+  for (let k = meet; k !== -1; k = par.get(k)) if (!S.impr[k]) cells.add(k);
+  return cells;
 }
 
 function stepToward(u, tx, ty) {
@@ -2171,6 +2266,8 @@ export function debugApi() {
     canEnter,
     isNaval,
     tradeActive,
+    landTradeActive,
+    roadDoneAt,
     recomputeBorders,
     cityRadius,
     unitAvailable,

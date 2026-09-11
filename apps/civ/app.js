@@ -219,8 +219,9 @@ function renderPanel() {
     if (sel.type === "worker") {
       const wk = key(sel.x, sel.y);
       if (sel.work) {
-        const nm = sel.work.kind === "farm" ? "🌱 Ферма" : "⚒ Шахта";
-        body += `<button class="btn text" disabled>${nm}: работа ${3 - sel.work.left}/3</button>`;
+        const total = sel.work.kind === "road" ? 2 : 3;
+        const nm = sel.work.kind === "farm" ? "🌱 Ферма" : sel.work.kind === "mine" ? "⚒ Шахта" : "🛤 Дорога";
+        body += `<button class="btn text" disabled>${nm}: работа ${total - sel.work.left}/${total}</button>`;
         body += `<button class="btn text" id="civ-cancelwork">✖ Отменить работу</button>`;
       } else {
         const terr = S.map[wk];
@@ -234,11 +235,13 @@ function renderPanel() {
           if (sel.moves <= 0) return "Нет ходов";
           if (kind === "farm" && terr !== TILE.GRASS && terr !== TILE.PLAINS) return "Ферма строится на лугах или равнине";
           if (kind === "mine" && terr !== TILE.HILLS) return "Шахта строится на холмах";
+          if (kind === "road" && (terr === TILE.OCEAN || !TERRAIN[terr].passable)) return "Дорога строится на проходимой суше";
           return "";
         };
-        const fr = reason("farm"), mr = reason("mine");
+        const fr = reason("farm"), mr = reason("mine"), rr = reason("road");
         body += `<button class="btn primary" id="civ-farm" ${fr ? `disabled title="${fr}"` : ""}>🌱 Построить ферму (3 хода)</button>`;
         body += `<button class="btn primary" id="civ-mine" ${mr ? `disabled title="${mr}"` : ""}>⚒ Построить шахту (3 хода)</button>`;
+        body += `<button class="btn primary" id="civ-road" ${rr ? `disabled title="${rr}"` : ""}>🛤 Построить дорогу (2 хода)</button>`;
       }
     }
     if (sel.type === "missionary") {
@@ -297,6 +300,11 @@ function renderPanel() {
   if (mbtn) mbtn.onclick = () => {
     const u = unitById(getState().sel);
     if (u && startImprovement(u.id, "mine").ok) { save(); refresh(); }
+  };
+  const rbtn = document.getElementById("civ-road");
+  if (rbtn) rbtn.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u && startImprovement(u.id, "road").ok) { save(); refresh(); }
   };
   const cw = document.getElementById("civ-cancelwork");
   if (cw) cw.onclick = () => {

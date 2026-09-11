@@ -490,6 +490,12 @@ export function createImprovementMesh(kind, done = true) {
     const n = done ? 4 : 2;
     for (let i = 0; i < n; i++) add(group, furrowGeo, i % 2 ? a : b, 0, 0.02, -0.22 + i * 0.145);
     if (done) add(group, geo("i:haystack", () => new THREE.ConeGeometry(0.075, 0.11, 6)), mat(C.sand), 0.25, 0.055, 0.25);
+  } else if (kind === "road") {
+    add(group, geo("i:road", () => new THREE.BoxGeometry(0.7, 0.02, 0.16)), done ? mat(C.coal) : tmat(C.coal), 0, 0.01, 0);
+    const tieGeo = geo("i:roadTie", () => new THREE.BoxGeometry(0.06, 0.022, 0.2));
+    const tieMat = done ? mat(C.woodDark) : tmat(C.woodDark);
+    add(group, tieGeo, tieMat, -0.18, 0.011, 0);
+    add(group, tieGeo, tieMat, 0.18, 0.011, 0);
   } else {
     add(group, geo("i:mound", () => new THREE.BoxGeometry(0.34, 0.13, 0.3)), done ? mat(C.stoneDark) : tmat(C.stoneDark), 0, 0.065, 0);
     if (done) {

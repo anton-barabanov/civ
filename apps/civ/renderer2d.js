@@ -49,9 +49,32 @@ export function createRenderer2D(container, handlers) {
       if (t.terrain === TILE.HILLS && !t.res) drawGlyph("⌃", t.x, t.y, 12);
       if (t.res && RESOURCES[t.res]) drawGlyph(RESOURCES[t.res].icon, t.x, t.y);
       if (t.impr) {
-        ctx.font = "10px sans-serif";
-        ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.fillText(t.impr.left ? (t.impr.kind === "farm" ? "🌱" : "⚒") : (t.impr.kind === "farm" ? "🌾" : "◆"), t.x * TS + 2, t.y * TS + 10);
+        if (t.impr.kind === "road") {
+          const cx = t.x * TS + TS / 2, cy = t.y * TS + TS / 2;
+          ctx.strokeStyle = t.impr.left ? "rgba(80,70,55,0.45)" : "rgba(45,38,28,0.9)";
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([4, 3]);
+          let linked = false;
+          ctx.beginPath();
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+            const nx = t.x + dx, ny = t.y + dy;
+            if (nx < 0 || ny < 0 || nx >= vm.W || ny >= vm.H) continue;
+            const nt = vm.tiles[ny * vm.W + nx];
+            const isRoad = nt.impr && nt.impr.kind === "road";
+            const isCity = vm.cities.some((c) => c.x === nx && c.y === ny && c.owner === t.owner);
+            if (!isRoad && !isCity) continue;
+            linked = true;
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(nx * TS + TS / 2, ny * TS + TS / 2);
+          }
+          if (!linked) { ctx.moveTo(cx - TS / 2 + 3, cy); ctx.lineTo(cx + TS / 2 - 3, cy); }
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          ctx.font = "10px sans-serif";
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.fillText(t.impr.left ? (t.impr.kind === "farm" ? "🌱" : "⚒") : (t.impr.kind === "farm" ? "🌾" : "◆"), t.x * TS + 2, t.y * TS + 10);
+        }
       }
       if (!t.visible) {
         ctx.fillStyle = "rgba(0,0,0,0.45)";
