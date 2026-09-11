@@ -490,6 +490,9 @@ function newGame(diff = 1, opponents = 1) {
     religions: [],
     wonders: [],
     space: {},
+    resDeals: [],
+    tributes: {},
+    pendingTribute: null,
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
@@ -1017,11 +1020,16 @@ function grantFreeTech(p) {
   return avail[0];
 }
 
-function resourceConnected(pIdx, r) {
+function resourceOwned(pIdx, r) {
   if (!S.res || !S.tileOwner) return false;
   for (let i = 0; i < W * H; i++)
     if (S.res[i] === r && S.tileOwner[i] === pIdx) return true;
   return false;
+}
+
+function resourceConnected(pIdx, r) {
+  if (resourceOwned(pIdx, r)) return true;
+  return (S.resDeals || []).some((d) => d.to === pIdx && d.res === r && d.left > 0 && !atWar(pIdx, d.from));
 }
 
 function unitAvailable(pIdx, unitId) {
@@ -1044,7 +1052,7 @@ function hasMarble(c) {
       const k = key(nx, ny);
       if (S.res[k] === "marble" && S.tileOwner[k] === c.owner) return true;
     }
-  return false;
+  return (S.resDeals || []).some((d) => d.res === "marble" && d.to === c.owner && d.left > 0 && !atWar(d.from, d.to));
 }
 
 function wonderCost(c, id) {
@@ -1130,6 +1138,41 @@ function processRevolts() {
         UNITS[u.type].atk > 0 && !UNITS[u.type].gp)) delta -= 1;
     c.revoltPressure = Math.max(0, (c.revoltPressure || 0) + delta);
     if (best && c.revoltPressure >= 5) flipCity(c, best.owner);
+  }
+}
+
+function processDeals() {
+  if (S.tributes) {
+    for (const tk of Object.keys(S.tributes)) {
+      const [i, j] = tk.split(":").map(Number);
+      if (!S.players[i] || !S.players[j] || atWar(i, j) || !playerAlive(i) || !playerAlive(j)) {
+        delete S.tributes[tk];
+        continue;
+      }
+      const t = S.tributes[tk];
+      const pay = Math.min(S.players[i].gold, t.amount);
+      S.players[i].gold -= pay;
+      S.players[j].gold += pay;
+      t.turnsLeft--;
+      if (t.turnsLeft <= 0) {
+        delete S.tributes[tk];
+        addLog(`Дань завершена: ${S.players[i].name} → ${S.players[j].name}`);
+      }
+    }
+  }
+  if (S.resDeals && S.resDeals.length) {
+    for (const d of [...S.resDeals]) {
+      if (!S.players[d.from] || !S.players[d.to] || atWar(d.from, d.to) ||
+        !playerAlive(d.from) || !playerAlive(d.to)) {
+        S.resDeals = S.resDeals.filter((x) => x !== d);
+        continue;
+      }
+      d.left--;
+      if (d.left <= 0) {
+        S.resDeals = S.resDeals.filter((x) => x !== d);
+        addLog(`Срок сделки о ресурсе истёк: ${RESOURCES[d.res].name} (${S.players[d.from].name} → ${S.players[d.to].name})`);
+      }
+    }
   }
 }
 
@@ -1268,6 +1311,7 @@ function processEconomy() {
   spreadReligions();
   processWork();
   processRevolts();
+  processDeals();
 }
 
 function buyForGold(cityId, k, id) {
@@ -1658,6 +1702,20 @@ function declareWar(i, j) {
   r.war = true;
   r.since = S.turn;
   addLog(`${S.players[i].name} объявляет войну ${S.players[j].name}`);
+  let purged = false;
+  if (S.tributes) {
+    for (const tk of [`${i}:${j}`, `${j}:${i}`])
+      if (S.tributes[tk]) { delete S.tributes[tk]; purged = true; }
+  }
+  if (S.resDeals && S.resDeals.some((d) => (d.from === i && d.to === j) || (d.from === j && d.to === i))) {
+    S.resDeals = S.resDeals.filter((d) => !((d.from === i && d.to === j) || (d.from === j && d.to === i)));
+    purged = true;
+  }
+  if (S.pendingTribute && (S.pendingTribute.ai === i || S.pendingTribute.ai === j)) {
+    S.pendingTribute = null;
+    purged = true;
+  }
+  if (purged) addLog(`Сделки и дань аннулированы: война (${S.players[i].name} ↔ ${S.players[j].name})`);
 }
 
 function makePeace(i, j) {
@@ -1690,9 +1748,21 @@ function offerPeace(humanIdx, aiIdx) {
   return false;
 }
 
-function aiAcceptsDeal(ai, other, givesId, getsId) {
-  const ratio = MIL_TECHS.includes(givesId) && strengthOf(other) > strengthOf(ai) ? 1 : 0.8;
-  return TECHS[getsId].cost >= TECHS[givesId].cost * ratio * relWarFactor(ai, other);
+function dealValue(bag) {
+  if (!bag) return 0;
+  let v = 0;
+  for (const t of bag.techs || []) if (TECHS[t]) v += TECHS[t].cost;
+  v += Math.max(0, bag.gold || 0);
+  v += 40 * (bag.res || []).length;
+  return v;
+}
+
+function aiAcceptsDeal(ai, other, aiGives, aiGets) {
+  const gives = typeof aiGives === "string" ? { techs: [aiGives] } : (aiGives || {});
+  const gets = typeof aiGets === "string" ? { techs: [aiGets] } : (aiGets || {});
+  const mil = (gives.techs || []).some((t) => MIL_TECHS.includes(t));
+  const ratio = mil && strengthOf(other) > strengthOf(ai) ? 1 : 0.8;
+  return dealValue(gets) >= dealValue(gives) * ratio * relWarFactor(ai, other);
 }
 
 function valueOfDeal(aiIdx, aiGivesId, aiGetsId) {
@@ -1722,8 +1792,97 @@ function offerTechTrade(fromIdx, toIdx, giveTechId, wantTechId) {
   return { ok: true };
 }
 
+function activeResDeal(i, j, res) {
+  return (S.resDeals || []).some((d) => d.res === res && d.left > 0 &&
+    ((d.from === i && d.to === j) || (d.from === j && d.to === i)));
+}
+
+function bagText(bag) {
+  const parts = [];
+  if ((bag.techs || []).length) parts.push(bag.techs.map((t) => TECHS[t].name).join(", "));
+  if (bag.gold) parts.push(`${bag.gold}🪙`);
+  if ((bag.res || []).length) parts.push(bag.res.map((r) => RESOURCES[r].name).join(", "));
+  return parts.length ? parts.join(" + ") : "ничего";
+}
+
+function offerDeal(fromIdx, toIdx, deal) {
+  const from = S.players[fromIdx], to = S.players[toIdx];
+  const give = (deal && deal.give) || {};
+  const get = (deal && deal.get) || {};
+  const no = (reason) => {
+    addLog(`Сделка отклонена: ${reason}`);
+    return { ok: false, reason };
+  };
+  if (!from || !to || fromIdx === toIdx) return no("неизвестный партнёр");
+  const r = S.relations[relKey(fromIdx, toIdx)];
+  if (!r || r.war) return no("торговля возможна только в мирное время");
+  const giveTechs = give.techs || [], getTechs = get.techs || [];
+  const giveGold = give.gold || 0, getGold = get.gold || 0;
+  const giveRes = give.res || [], getRes = get.res || [];
+  if (giveTechs.length === 1 && getTechs.length === 1 && !giveGold && !getGold && !giveRes.length && !getRes.length)
+    return offerTechTrade(fromIdx, toIdx, giveTechs[0], getTechs[0]);
+  if (dealValue(give) === 0 && dealValue(get) === 0) return no("пустая сделка");
+  if (giveGold < 0 || getGold < 0) return no("некорректная сумма золота");
+  if (S.turn - (r.lastTradeTurn ?? -99) < TRADE_COOLDOWN) return no("сделка была недавно");
+  for (const t of giveTechs) {
+    if (!TECHS[t]) return no("неизвестная технология");
+    if (!from.techs.includes(t)) return no("отдаваемая технология не изучена");
+    if (to.techs.includes(t)) return no("технология уже известна партнёру");
+  }
+  for (const t of getTechs) {
+    if (!TECHS[t]) return no("неизвестная технология");
+    if (!to.techs.includes(t)) return no("у партнёра нет запрашиваемой технологии");
+    if (from.techs.includes(t)) return no("технология уже изучена вами");
+  }
+  if (giveGold > from.gold) return no("недостаточно золота");
+  if (getGold > to.gold) return no("у партнёра недостаточно золота");
+  for (const res of giveRes) {
+    if (!RESOURCES[res]) return no("неизвестный ресурс");
+    if (!resourceOwned(fromIdx, res)) return no(`ресурс не подключён: ${RESOURCES[res].name}`);
+    if (activeResDeal(fromIdx, toIdx, res)) return no("сделка по этому ресурсу уже действует");
+  }
+  for (const res of getRes) {
+    if (!RESOURCES[res]) return no("неизвестный ресурс");
+    if (!resourceOwned(toIdx, res)) return no(`у партнёра нет ресурса: ${RESOURCES[res].name}`);
+    if (activeResDeal(fromIdx, toIdx, res)) return no("сделка по этому ресурсу уже действует");
+  }
+  if (!to.isHuman && !aiAcceptsDeal(toIdx, fromIdx, get, give))
+    return no("сделка невыгодна для партнёра");
+  if (!S.resDeals) S.resDeals = [];
+  if (giveGold) { from.gold -= giveGold; to.gold += giveGold; }
+  if (getGold) { to.gold -= getGold; from.gold += getGold; }
+  for (const t of giveTechs) grantTech(to, t);
+  for (const t of getTechs) grantTech(from, t);
+  for (const res of giveRes) S.resDeals.push({ from: fromIdx, to: toIdx, res, left: 20 });
+  for (const res of getRes) S.resDeals.push({ from: toIdx, to: fromIdx, res, left: 20 });
+  r.lastTradeTurn = S.turn;
+  addLog(`Сделка: ${from.name} ↔ ${to.name} — ${bagText(give)} за ${bagText(get)}`);
+  return { ok: true };
+}
+
+function demandTribute(fromIdx, toIdx) {
+  const from = S.players[fromIdx], to = S.players[toIdx];
+  const no = (reason) => {
+    addLog(`Требование дани отклонено: ${reason}`);
+    return { ok: false, reason };
+  };
+  if (!from || !to || fromIdx === toIdx) return no("неизвестный партнёр");
+  const r = S.relations[relKey(fromIdx, toIdx)];
+  if (!r || r.war) return no("дань возможна только в мирное время");
+  if (S.turn - (r.lastTradeTurn ?? -99) < TRADE_COOLDOWN) return no("дань была недавно");
+  const amount = Math.min(30, Math.max(5, Math.round(strengthOf(toIdx) / 3)));
+  if (!to.isHuman && strengthOf(toIdx) >= PEACE_STRENGTH * strengthOf(fromIdx))
+    return no(`${to.name} отказываются платить дань`);
+  if (!S.tributes) S.tributes = {};
+  S.tributes[`${toIdx}:${fromIdx}`] = { amount, turnsLeft: 10 };
+  r.lastTradeTurn = S.turn;
+  addLog(`Дань: ${from.name} требует ${amount}🪙 в ход с ${to.name} (10 ходов)`);
+  return { ok: true, amount };
+}
+
 function aiDiplomacy() {
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  if (S.pendingTribute && S.turn > S.pendingTribute.turn) S.pendingTribute = null;
   for (const k of Object.keys(S.relations)) {
     const [a, b] = k.split(":").map(Number);
     if (S.relations[k].war && (!playerAlive(a) || !playerAlive(b))) {
@@ -1784,6 +1943,19 @@ function aiDiplomacy() {
         }
       }
     }
+  if (!S.pendingTribute && playerAlive(0) && Math.random() < 0.3) {
+    for (let i = 1; i < S.players.length; i++) {
+      if (!playerAlive(i) || atWar(0, i)) continue;
+      const rel = S.relations[relKey(0, i)];
+      if (!rel || S.turn - (rel.lastTradeTurn ?? -99) < TRADE_COOLDOWN) continue;
+      if (strengthOf(0) >= PEACE_STRENGTH * strengthOf(i)) continue;
+      const amount = Math.min(30, Math.max(5, Math.round(strengthOf(0) / 3)));
+      S.pendingTribute = { ai: i, amount, turn: S.turn };
+      rel.lastTradeTurn = S.turn;
+      addLog(`${S.players[i].name} требуют дань ${amount}🪙 в ход (10 ходов)`);
+      break;
+    }
+  }
 }
 
 function playerAlive(idx) {
@@ -1868,6 +2040,18 @@ function load() {
     if (!Array.isArray(S.religions)) S.religions = [];
     if (!Array.isArray(S.wonders)) S.wonders = [];
     if (!S.space) S.space = {};
+    if (!Array.isArray(S.resDeals)) S.resDeals = [];
+    if (!S.tributes || typeof S.tributes !== "object") S.tributes = {};
+    if (!S.pendingTribute) S.pendingTribute = null;
+    for (const tk of Object.keys(S.tributes)) {
+      const [a, b] = tk.split(":").map(Number);
+      if (Number.isInteger(a) && Number.isInteger(b) && !atWar(a, b) && playerAlive(a) && playerAlive(b)) continue;
+      delete S.tributes[tk];
+    }
+    S.resDeals = S.resDeals.filter((d) => d && Number.isInteger(d.from) && Number.isInteger(d.to) &&
+      !atWar(d.from, d.to) && playerAlive(d.from) && playerAlive(d.to) && d.left > 0 && !!RESOURCES[d.res]);
+    if (S.pendingTribute && (!S.players[S.pendingTribute.ai] ||
+      atWar(0, S.pendingTribute.ai) || !playerAlive(S.pendingTribute.ai))) S.pendingTribute = null;
     if (S.over && !S.over.type) S.over.type = "conquest";
     for (const c of S.cities) {
       if (!c.religion) c.religion = null;
@@ -1912,7 +2096,8 @@ export {
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
   spreadFaith, declareStateReligion, relWarFactor,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
-  unitAvailable, resourceConnected, hasMarble, wonderCost, startImprovement, cancelWork,
+  offerDeal, dealValue, demandTribute, processDeals,
+  unitAvailable, resourceConnected, resourceOwned, hasMarble, wonderCost, startImprovement, cancelWork,
 };
 
 export function debugApi() {
@@ -1945,6 +2130,10 @@ export function debugApi() {
     strengthOf,
     offerTechTrade,
     valueOfDeal,
+    offerDeal,
+    dealValue,
+    demandTribute,
+    processDeals,
     grantTech,
     findStarts,
     playerAlive,
@@ -1986,6 +2175,7 @@ export function debugApi() {
     cityRadius,
     unitAvailable,
     resourceConnected,
+    resourceOwned,
     hasMarble,
     wonderCost,
     startImprovement,

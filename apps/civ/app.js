@@ -4,7 +4,7 @@ import {
   foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
-  relKey, atWar, declareWar, offerPeace, strengthOf, offerTechTrade,
+  relKey, atWar, declareWar, offerPeace, strengthOf, offerDeal, demandTribute, resourceOwned,
   RELIGIONS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
@@ -558,18 +558,32 @@ function showTech() {
   });
 }
 
-let diploTrade = { open: null, give: null, want: null, status: "" };
+let diploTrade = { open: null, giveTech: null, wantTech: null, giveGold: 0, wantGold: 0, giveRes: [], wantRes: [], status: "" };
+
+function toggleArr(arr, v) { return arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]; }
 
 function showDiplo() {
   closeModal();
   const S = getState();
   const me = S.players[0];
+  const dt = diploTrade;
+  const pt = S.pendingTribute && S.players[S.pendingTribute.ai] ? S.pendingTribute : null;
+  const ptCard = pt ? `
+      <div class="civ-prod">
+        <b>⚠ ${escapeHtml(S.players[pt.ai].name)} требуют дань</b>
+        <span>${pt.amount}🪙 в ход в течение 10 ходов</span>
+        <span>
+          <button class="btn text" id="civ-pt-pay">Принять</button>
+          <button class="btn text" id="civ-pt-war" title="Отказ означает немедленную войну">Отказать (война)</button>
+        </span>
+      </div>` : "";
   const m = document.createElement("div");
   m.className = "civ-modal";
   m.id = "civ-modal";
   m.innerHTML = `
     <div class="civ-dialog civ-techs">
       <h2>🤝 Дипломатия</h2>
+      ${ptCard}
       <div class="civ-prod-list">
         ${S.players.slice(1).map((p, idx) => {
           const i = idx + 1;
@@ -577,9 +591,28 @@ function showDiplo() {
           const status = rel.war ? `⚔ война с хода ${rel.since}` : "🕊 мир";
           const cd = 10 - (S.turn - (rel.lastTradeTurn ?? -99));
           const cooldown = !rel.war && cd > 0;
-          const open = !rel.war && diploTrade.open === i;
+          const open = !rel.war && dt.open === i;
           const mine = me.techs.filter((t) => !p.techs.includes(t));
           const theirs = p.techs.filter((t) => !me.techs.includes(t));
+          const myRes = Object.keys(RESOURCES).filter((r) => resourceOwned(0, r));
+          const theirRes = Object.keys(RESOURCES).filter((r) => resourceOwned(i, r));
+          const tin = (S.tributes || {})[`${i}:0`];
+          const tout = (S.tributes || {})[`0:${i}`];
+          const pairDeals = (S.resDeals || []).filter((d) => (d.from === 0 && d.to === i) || (d.from === i && d.to === 0));
+          const summaryBits = [];
+          if (tin) summaryBits.push(`Получаете дань ${tin.amount}🪙/ход (ост. ${tin.turnsLeft})`);
+          if (tout) summaryBits.push(`Платите дань ${tout.amount}🪙/ход (ост. ${tout.turnsLeft})`);
+          if (pairDeals.length) summaryBits.push(`Ресурсы по сделке: ${pairDeals.map((d) => `${RESOURCES[d.res].icon} ${RESOURCES[d.res].name} (ост. ${d.left})`).join(", ")}`);
+          const hasSel = !!(dt.giveTech || dt.wantTech || dt.giveGold || dt.wantGold || dt.giveRes.length || dt.wantRes.length);
+          const goldBtns = (cur, who, treasury) => [25, 50, 100]
+            .filter((g) => g < treasury)
+            .map((g) => `<button class="civ-prod ${cur === g ? "sel" : ""}" data-${who}-gold="${g}"><b>${g}🪙</b></button>`).join("") +
+            (treasury > 0 ? `<button class="civ-prod ${cur === treasury ? "sel" : ""}" data-${who}-gold="${treasury}"><b>всё ${treasury}🪙</b></button>` : "");
+          const resBtns = (cur, who, list) => list.map((r) => `<button class="civ-prod ${cur.includes(r) ? "sel" : ""}" data-${who}-res="${r}"><b>${RESOURCES[r].icon} ${RESOURCES[r].name}</b><span>ресурс</span></button>`).join("");
+          const tributeOk = !cooldown && strengthOf(i) < 0.6 * strengthOf(0);
+          const tributeTitle = cooldown
+            ? `Дань доступна через ${cd} ход.`
+            : `Нужен значительный перевес силы: ${strengthOf(0)} против ${strengthOf(i)}`;
           return `<div class="civ-prod">
             <b><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${p.color};margin-right:6px;vertical-align:middle"></span>${escapeHtml(p.name)}</b>
             <span>${status} · сила: ${strengthOf(i)}</span>
@@ -588,28 +621,36 @@ function showDiplo() {
               <button class="btn text" data-peace="${i}" ${rel.war ? "" : "disabled"}>Предложить мир</button>
               ${rel.war
                 ? `<button class="btn text" disabled>Торговля</button> <i>Только в мирное время</i>`
-                : `<button class="btn text" data-trade="${i}">${open ? "Скрыть торговлю" : "Торговля"}</button>${cooldown ? ` <i>обмен доступен через ${cd} ход.</i>` : ""}`}
+                : `<button class="btn text" data-trade="${i}">${open ? "Скрыть сделки" : "Сделки"}</button>${cooldown ? ` <i>сделка доступна через ${cd} ход.</i>` : ""}`}
             </span>
           </div>
           ${open ? `
           <div class="civ-prod" style="flex-direction:column;align-items:stretch;gap:6px">
-            <b>🔬 Обмен технологиями</b>
-            ${cooldown ? `<span>Обмен доступен через ${cd} ходов</span>` : ""}
+            <b>🤝 Сделки</b>
+            ${summaryBits.length ? `<span>${summaryBits.join(" · ")}</span>` : ""}
+            ${cooldown ? `<span>Сделка доступна через ${cd} ходов</span>` : ""}
             <div style="display:flex;gap:10px;flex-wrap:wrap">
               <div style="flex:1;min-width:180px"><b>Отдаю:</b>
                 <div class="civ-prod-list" style="margin-top:4px">
-                  ${mine.length ? mine.map((t) => `<button class="civ-prod ${diploTrade.give === t ? "sel" : ""}" data-give="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий для обмена</span>"}
+                  ${mine.length ? mine.map((t) => `<button class="civ-prod ${dt.giveTech === t ? "sel" : ""}" data-give-tech="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий</span>"}
+                  ${goldBtns(dt.giveGold, "give", me.gold)}
+                  ${myRes.length ? resBtns(dt.giveRes, "give", myRes) : ""}
                 </div>
               </div>
               <div style="flex:1;min-width:180px"><b>Прошу:</b>
                 <div class="civ-prod-list" style="margin-top:4px">
-                  ${theirs.length ? theirs.map((t) => `<button class="civ-prod ${diploTrade.want === t ? "sel" : ""}" data-want="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий для обмена</span>"}
+                  ${theirs.length ? theirs.map((t) => `<button class="civ-prod ${dt.wantTech === t ? "sel" : ""}" data-want-tech="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий</span>"}
+                  ${goldBtns(dt.wantGold, "want", p.gold)}
+                  ${theirRes.length ? resBtns(dt.wantRes, "want", theirRes) : ""}
                 </div>
               </div>
             </div>
             <div>
-              <button class="btn text" data-offer="${i}" ${diploTrade.give && diploTrade.want && !cooldown ? "" : "disabled"}>Предложить обмен 1:1</button>
-              ${diploTrade.status ? `<span> ${escapeHtml(diploTrade.status)}</span>` : ""}
+              <button class="btn text" data-offer="${i}" ${hasSel && !cooldown ? "" : "disabled"}>Предложить сделку</button>
+              ${dt.status ? `<span> ${escapeHtml(dt.status)}</span>` : ""}
+            </div>
+            <div>
+              <button class="btn text" data-tribute="${i}" ${tributeOk ? "" : `disabled title="${tributeTitle}"`}>Потребовать дань</button>
             </div>
           </div>` : ""}`;
         }).join("")}
@@ -619,6 +660,29 @@ function showDiplo() {
   `;
   rootEl.appendChild(m);
   document.getElementById("civ-close").onclick = closeModal;
+  const payBtn = document.getElementById("civ-pt-pay");
+  if (payBtn) payBtn.onclick = () => {
+    const st = getState();
+    const pd = st.pendingTribute;
+    if (!pd) return;
+    if (!st.tributes) st.tributes = {};
+    st.tributes[`0:${pd.ai}`] = { amount: pd.amount, turnsLeft: 10 };
+    st.pendingTribute = null;
+    save();
+    refresh();
+    showDiplo();
+  };
+  const warBtn = document.getElementById("civ-pt-war");
+  if (warBtn) warBtn.onclick = () => {
+    const st = getState();
+    const pd = st.pendingTribute;
+    if (!pd) return;
+    st.pendingTribute = null;
+    declareWar(pd.ai, 0);
+    save();
+    refresh();
+    showDiplo();
+  };
   m.querySelectorAll("[data-war]").forEach((b) => {
     b.onclick = () => {
       const i = Number(b.dataset.war);
@@ -640,30 +704,80 @@ function showDiplo() {
   m.querySelectorAll("[data-trade]").forEach((b) => {
     b.onclick = () => {
       const i = Number(b.dataset.trade);
-      diploTrade = { open: diploTrade.open === i ? null : i, give: null, want: null, status: "" };
+      diploTrade = { open: diploTrade.open === i ? null : i, giveTech: null, wantTech: null, giveGold: 0, wantGold: 0, giveRes: [], wantRes: [], status: "" };
       showDiplo();
     };
   });
-  m.querySelectorAll("[data-give]").forEach((b) => {
+  m.querySelectorAll("[data-give-tech]").forEach((b) => {
     b.onclick = () => {
-      diploTrade.give = diploTrade.give === b.dataset.give ? null : b.dataset.give;
+      diploTrade.giveTech = diploTrade.giveTech === b.dataset.giveTech ? null : b.dataset.giveTech;
       showDiplo();
     };
   });
-  m.querySelectorAll("[data-want]").forEach((b) => {
+  m.querySelectorAll("[data-want-tech]").forEach((b) => {
     b.onclick = () => {
-      diploTrade.want = diploTrade.want === b.dataset.want ? null : b.dataset.want;
+      diploTrade.wantTech = diploTrade.wantTech === b.dataset.wantTech ? null : b.dataset.wantTech;
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-give-gold]").forEach((b) => {
+    b.onclick = () => {
+      const g = Number(b.dataset.giveGold);
+      diploTrade.giveGold = diploTrade.giveGold === g ? 0 : g;
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-want-gold]").forEach((b) => {
+    b.onclick = () => {
+      const g = Number(b.dataset.wantGold);
+      diploTrade.wantGold = diploTrade.wantGold === g ? 0 : g;
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-give-res]").forEach((b) => {
+    b.onclick = () => {
+      diploTrade.giveRes = toggleArr(diploTrade.giveRes, b.dataset.giveRes);
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-want-res]").forEach((b) => {
+    b.onclick = () => {
+      diploTrade.wantRes = toggleArr(diploTrade.wantRes, b.dataset.wantRes);
       showDiplo();
     };
   });
   m.querySelectorAll("[data-offer]").forEach((b) => {
     b.onclick = () => {
       const i = Number(b.dataset.offer);
-      const r = offerTechTrade(0, i, diploTrade.give, diploTrade.want);
-      diploTrade.status = r.ok ? "Обмен состоялся" : `Отказ: ${r.reason}`;
+      const give = {};
+      if (diploTrade.giveTech) give.techs = [diploTrade.giveTech];
+      if (diploTrade.giveGold > 0) give.gold = diploTrade.giveGold;
+      if (diploTrade.giveRes.length) give.res = [...diploTrade.giveRes];
+      const get = {};
+      if (diploTrade.wantTech) get.techs = [diploTrade.wantTech];
+      if (diploTrade.wantGold > 0) get.gold = diploTrade.wantGold;
+      if (diploTrade.wantRes.length) get.res = [...diploTrade.wantRes];
+      const r = offerDeal(0, i, { give, get });
+      diploTrade.status = r.ok ? "Сделка состоялась" : `Отказ: ${r.reason}`;
       if (r.ok) {
-        diploTrade.give = null;
-        diploTrade.want = null;
+        diploTrade.giveTech = null;
+        diploTrade.wantTech = null;
+        diploTrade.giveGold = 0;
+        diploTrade.wantGold = 0;
+        diploTrade.giveRes = [];
+        diploTrade.wantRes = [];
+        save();
+        refresh();
+      }
+      showDiplo();
+    };
+  });
+  m.querySelectorAll("[data-tribute]").forEach((b) => {
+    b.onclick = () => {
+      const i = Number(b.dataset.tribute);
+      const r = demandTribute(0, i);
+      diploTrade.status = r.ok ? `Дань назначена: ${r.amount}🪙/ход на 10 ходов` : `Отказ: ${r.reason}`;
+      if (r.ok) {
         save();
         refresh();
       }
