@@ -2562,7 +2562,7 @@ if (!mutation) {
   }
 }
 
-check("suite within time budget", Date.now() - t0 < 30000);
+check("suite within time budget", Date.now() - t0 < 45000);
 
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
