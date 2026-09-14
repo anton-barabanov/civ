@@ -950,8 +950,8 @@ api.foundCity(wS);
 api.foundCity(api.spawn("settler", 0, wS.x + 2 <= 25 ? wS.x + 2 : wS.x - 2, wS.y));
 for (const c of api.S.cities) { c.pop = 1; c.culture = 0; c.foodStored = 0; c.prodStored = 0; c.buildings = []; c.producing = null; }
 const WT = api.WONDERS;
-check("WONDERS table valid", !!WT && Object.keys(WT).length === 6 &&
-  ["pyramids", "greatlibrary", "colossus", "greatwall", "oraclew", "worldcouncil"].every((id) =>
+check("WONDERS table valid", !!WT && Object.keys(WT).length === 10 &&
+  ["pyramids", "greatlibrary", "colossus", "greatwall", "oraclew", "worldcouncil", "gardens", "artemis", "terracotta", "lighthouse"].every((id) =>
     WT[id] && WT[id].name && WT[id].icon && WT[id].desc && api.TECHS[WT[id].tech]) &&
   Object.values(WT).every((w) => w.cost >= 130 && w.cost <= 200 && w.effects));
 

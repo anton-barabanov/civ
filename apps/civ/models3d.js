@@ -488,6 +488,58 @@ export function createWonderMesh(id) {
     ped.rotation.x = -Math.PI / 2;
     add(group, geo("w:orcOrb", () => new THREE.SphereGeometry(0.028, 6, 5)), goldM, 0, 0.72, 0);
     group.rotation.y = Math.PI / 4;
+  } else if (id === "gardens") {
+    const foliageM = mat(C.foliage);
+    const foliageDarkM = mat(C.foliageDark);
+    add(group, geo("w:hgTerr1", () => new THREE.BoxGeometry(0.44, 0.09, 0.34)), stoneM, 0, 0.045, 0);
+    add(group, geo("w:hgTerr2", () => new THREE.BoxGeometry(0.32, 0.09, 0.26)), stoneDarkM, 0.03, 0.135, 0.02);
+    add(group, geo("w:hgTerr3", () => new THREE.BoxGeometry(0.2, 0.08, 0.18)), stoneM, 0.06, 0.22, 0.04);
+    const bushGeo = geo("w:hgBush", () => new THREE.SphereGeometry(0.05, 6, 5));
+    add(group, bushGeo, foliageM, -0.19, 0.12, -0.12);
+    add(group, bushGeo, foliageDarkM, 0.21, 0.12, 0.12);
+    add(group, bushGeo, foliageM, 0.12, 0.12, 0.17);
+    add(group, bushGeo, foliageDarkM, -0.1, 0.12, 0.15);
+    add(group, bushGeo, foliageM, -0.14, 0.12, -0.03);
+    const trunkGeo = geo("w:hgTrunk", () => new THREE.CylinderGeometry(0.014, 0.02, 0.1, 5));
+    const crownGeo = geo("w:hgCrown", () => new THREE.ConeGeometry(0.055, 0.15, 6));
+    add(group, trunkGeo, mat(C.trunk), 0, 0.31, 0.07);
+    add(group, crownGeo, foliageM, 0, 0.42, 0.07);
+    add(group, trunkGeo, mat(C.trunk), 0.11, 0.26, -0.01);
+    add(group, crownGeo, foliageDarkM, 0.11, 0.36, -0.01);
+    add(group, geo("w:hgCol", () => new THREE.CylinderGeometry(0.018, 0.022, 0.15, 6)), limeM, -0.02, 0.335, 0);
+    add(group, geo("w:hgPavRoof", () => new THREE.ConeGeometry(0.05, 0.06, 4)), mat(C.roof), -0.02, 0.44, 0).rotation.y = Math.PI / 4;
+    group.rotation.y = Math.PI / 4;
+  } else if (id === "artemis") {
+    add(group, geo("w:artPodium", () => new THREE.BoxGeometry(0.44, 0.06, 0.3)), stoneM, 0, 0.03, 0);
+    const colGeo = geo("w:artCol", () => new THREE.CylinderGeometry(0.018, 0.022, 0.32, 6));
+    for (const x of [-0.16, -0.08, 0, 0.08, 0.16]) {
+      add(group, colGeo, limeM, x, 0.22, -0.09);
+      add(group, colGeo, limeM, x, 0.22, 0.09);
+    }
+    add(group, geo("w:artArch", () => new THREE.BoxGeometry(0.46, 0.05, 0.26)), stoneM, 0, 0.405, 0);
+    const ped = add(group, geo("w:artPediment", () => new THREE.CylinderGeometry(0.17, 0.17, 0.24, 3)), goldM, 0, 0.53, 0);
+    ped.rotation.x = -Math.PI / 2;
+    add(group, geo("w:artStatBase", () => new THREE.BoxGeometry(0.08, 0.05, 0.08)), stoneDarkM, 0, 0.085, 0);
+    add(group, geo("w:artStatBody", () => new THREE.CylinderGeometry(0.032, 0.048, 0.17, 7)), goldM, 0, 0.195, 0);
+    add(group, geo("w:artStatHead", () => new THREE.SphereGeometry(0.038, 7, 6)), goldM, 0, 0.3, 0);
+    add(group, geo("w:artBow", () => new THREE.TorusGeometry(0.06, 0.01, 6, 10, Math.PI)), mat(C.bronze), 0.07, 0.24, 0).rotation.y = Math.PI / 2;
+    group.rotation.y = Math.PI / 4;
+  } else if (id === "terracotta") {
+    const clayM = mat("#a05a35");
+    add(group, geo("w:tfGround", () => new THREE.BoxGeometry(0.46, 0.04, 0.32)), mat(C.sand), 0, 0.02, 0);
+    add(group, geo("w:tfRidge", () => new THREE.BoxGeometry(0.46, 0.035, 0.05)), mat(C.rock), 0, 0.048, -0.12);
+    for (const x of [-0.14, -0.05, 0.04, 0.13]) addFigure(group, clayM, 0.05, 0.19, x, 0.05);
+    for (const x of [-0.1, 0, 0.1]) addFigure(group, clayM, 0.05, 0.19, x, -0.06);
+    group.rotation.y = Math.PI / 8;
+  } else if (id === "lighthouse") {
+    add(group, geo("w:lhBase", () => new THREE.BoxGeometry(0.3, 0.06, 0.3)), stoneDarkM, 0, 0.03, 0);
+    add(group, geo("w:lhT1", () => new THREE.CylinderGeometry(0.12, 0.155, 0.18, 8)), mat(C.sand), 0, 0.15, 0);
+    add(group, geo("w:lhT2", () => new THREE.CylinderGeometry(0.095, 0.12, 0.16, 8)), stoneM, 0, 0.32, 0);
+    add(group, geo("w:lhT3", () => new THREE.CylinderGeometry(0.07, 0.095, 0.14, 8)), mat(C.sand), 0, 0.47, 0);
+    add(group, geo("w:lhGallery", () => new THREE.CylinderGeometry(0.105, 0.085, 0.04, 8)), stoneDarkM, 0, 0.56, 0);
+    add(group, geo("w:lhLantern", () => new THREE.CylinderGeometry(0.05, 0.058, 0.09, 8)), mat(C.snow), 0, 0.625, 0);
+    add(group, geo("w:lhFlame", () => new THREE.ConeGeometry(0.045, 0.12, 6)), goldM, 0, 0.73, 0);
+    add(group, geo("w:lhDoor", () => new THREE.BoxGeometry(0.06, 0.08, 0.02)), mat(C.woodDark), 0, 0.1, 0.15);
   }
   return group;
 }

@@ -74,6 +74,10 @@ const WONDERS = {
   greatwall: { name: "Великая стена", icon: "🧱", cost: 150, tech: "construction", desc: "+50% защиты всех городов", effects: { defMult: 1.5 } },
   oraclew: { name: "Оракул", icon: "✨", cost: 130, tech: "mysticism", desc: "Бесплатная технология при завершении", effects: { freeTech: 1 } },
   worldcouncil: { name: "Всемирный совет", icon: "🕊", cost: 200, tech: "diplomacy", desc: "Выборы лидера мира каждые 15 ходов", effects: {} },
+  gardens: { name: "Висячие сады", icon: "🌿", cost: 170, tech: "mathematics", desc: "+2 еды во всех городах", effects: { foodFlat: 2 } },
+  artemis: { name: "Храм Артемиды", icon: "🦌", cost: 180, tech: "construction", desc: "+2 культуры во всех городах", effects: { culture: 2 } },
+  terracotta: { name: "Терракотовая армия", icon: "🏺", cost: 200, tech: "bureaucracy", desc: "3 бесплатных мечника при завершении", effects: { freeUnits: { id: "swordsman", n: 3 } } },
+  lighthouse: { name: "Маяк Александрийский", icon: "🗼", cost: 190, tech: "compass", desc: "+50% золотого дохода от морской торговли во всех городах", effects: { tradeMult: 1.5 } },
 };
 
 const SS_PARTS = {
@@ -112,6 +116,8 @@ const TECHS = {
   rocketry: { name: "Ракетостроение", cost: 300, req: ["electricity"] },
   democracy: { name: "Демократия", cost: 160, req: ["banking", "education"] },
   flight: { name: "Полёт", cost: 260, req: ["electricity"] },
+  bureaucracy: { name: "Государственное управление", cost: 200, req: ["banking", "education"] },
+  compass: { name: "Компас", cost: 150, req: ["astronomy"] },
 };
 
 const RELIGIONS = {
@@ -974,13 +980,15 @@ function cityHappiness(c) {
 }
 
 function playerEffects(pIdx) {
-  const e = { prodFlat: 0, sciMult: 1, tradeMult: 1, defMult: 1, freeTech: 0 };
+  const e = { prodFlat: 0, foodFlat: 0, culture: 0, sciMult: 1, tradeMult: 1, defMult: 1, freeTech: 0 };
   for (const w of S.wonders) {
     const c = cityById(w.cityId);
     if (!c || c.owner !== pIdx) continue;
     const f = WONDERS[w.id] ? WONDERS[w.id].effects : null;
     if (!f) continue;
     e.prodFlat += f.prodFlat || 0;
+    e.foodFlat += f.foodFlat || 0;
+    e.culture += f.culture || 0;
     e.sciMult *= f.sciMult || 1;
     e.tradeMult *= f.tradeMult || 1;
     e.defMult *= f.defMult || 1;
@@ -1121,6 +1129,7 @@ function cityYields(c) {
   const e = buildingEffects(c);
   const pe = playerEffects(c.owner);
   food += e.foodFlat;
+  food += pe.foodFlat || 0;
   prod += e.prodFlat + pe.prodFlat;
   let sci = 2 + Math.floor(c.pop / 2) + e.sciFlat + (isHolyCity(c) ? 2 : 0);
   sci = Math.round(sci * e.sciMult * pe.sciMult);
@@ -1333,7 +1342,8 @@ function processEconomy() {
     const p = S.players[c.owner];
     const y = cityYields(c);
     const e = buildingEffects(c);
-    const cultGrowth = 1 + e.culture + (c.religion ? 1 : 0) +
+    const pe = playerEffects(c.owner);
+    const cultGrowth = 1 + e.culture + (pe.culture || 0) + (c.religion ? 1 : 0) +
       (p.stateReligion && c.religion === p.stateReligion ? 1 : 0);
     c.culture = (c.culture || 0) + cultGrowth;
     p.gpPoints = (p.gpPoints || 0) + Math.floor(cultGrowth / 2);
@@ -1382,6 +1392,11 @@ function processEconomy() {
             if (def.effects.freeTech) {
               const free = grantFreeTech(p);
               if (free) addLog(`Оракул дарует знание: ${TECHS[free].name}`);
+            }
+            if (def.effects.freeUnits) {
+              const fu = def.effects.freeUnits;
+              for (let i = 0; i < fu.n; i++) spawn(fu.id, c.owner, c.x, c.y);
+              addLog(`${def.name}: ${fu.n} ${UNITS[fu.id].name} вступают в строй ${c.name}`);
             }
           }
           c.producing = null;
