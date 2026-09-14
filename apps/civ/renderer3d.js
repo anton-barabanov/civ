@@ -117,7 +117,7 @@ export async function createRenderer3D(container, handlers) {
   const onKeyDown = (e) => {
     if (e.code === "Space") {
       spaceHeld = true;
-      if (pointer.down) e.preventDefault();
+      if (!(e.target && e.target.tagName === "INPUT")) e.preventDefault();
     }
   };
   const onKeyUp = (e) => {
@@ -157,8 +157,9 @@ export async function createRenderer3D(container, handlers) {
     pointer.sx = e.clientX;
     pointer.sy = e.clientY;
     pointer.moved += Math.abs(dx) + Math.abs(dy);
-    if (pointer.shift || pointer.ctrl || spaceHeld || pointer.button === 1 || pointer.button === 2) pan(dx, dy);
-    else rotate(dx, dy);
+    const wantRotate = pointer.button === 2 || pointer.shift || pointer.ctrl || e.ctrlKey || e.metaKey || spaceHeld;
+    if (wantRotate) rotate(dx, dy);
+    else pan(dx, dy);
   };
 
   const onPointerUp = (e) => {
