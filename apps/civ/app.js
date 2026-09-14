@@ -1,7 +1,7 @@
 import {
   TILE, TERRAIN, UNITS, BUILDINGS, TECHS, DIFFICULTIES, W, H,
   key, inMap, unitsAt, cityAt, unitById, isCoastal, reachable, moveUnit, attack, bombard,
-  foundCity, cityYields, techAvailable, newGame, endTurn, save, load,
+  foundCity, cityYields, techAvailable, newGame, finishTurn, save, load,
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf, offerDeal, mapValue, demandTribute, resourceOwned,
@@ -43,10 +43,11 @@ async function swapRenderer() {
 
 function buildViewModel() {
   const S = getState();
+  const cur = S.currentPlayer ?? 0;
   const visible = getVisible();
-  const explored = S.players[0].explored;
+  const explored = S.players[cur].explored;
   const sel = S.sel ? unitById(S.sel) : null;
-  const reach = sel && sel.owner === 0
+  const reach = sel && sel.owner === cur
     ? [...reachable(sel).keys()].map((k) => ({ x: k % W, y: Math.floor(k / W) }))
     : [];
   const tiles = [];
@@ -73,11 +74,12 @@ function buildViewModel() {
       wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
     }));
   const units = S.units
-    .filter((u) => (u.owner === 0 || visible[key(u.x, u.y)]) && explored[key(u.x, u.y)])
-    .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === 0 && u.moves > 0, icon: UNITS[u.type].icon, air: !!UNITS[u.type].air }));
+    .filter((u) => (u.owner === cur || visible[key(u.x, u.y)]) && explored[key(u.x, u.y)])
+    .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === cur && u.moves > 0, icon: UNITS[u.type].icon, air: !!UNITS[u.type].air }));
   return {
     W,
     H,
+    currentPlayer: cur,
     players: S.players.map((p) => ({ color: p.color })),
     tiles,
     cities,
@@ -92,24 +94,25 @@ let bombMode = false;
 function onTileClick(x, y) {
   const S = getState();
   if (S.over) { refresh(); return; }
-  if (!inMap(x, y) || !S.players[0].explored[key(x, y)]) return;
+  const cur = S.currentPlayer ?? 0;
+  if (!inMap(x, y) || !S.players[cur].explored[key(x, y)]) return;
   const sel = S.sel ? unitById(S.sel) : null;
-  if (!(sel && sel.owner === 0 && sel.type === "bomber" && sel.moves > 0)) bombMode = false;
-  if (bombMode && sel && sel.owner === 0 && sel.type === "bomber") {
+  if (!(sel && sel.owner === cur && sel.type === "bomber" && sel.moves > 0)) bombMode = false;
+  if (bombMode && sel && sel.owner === cur && sel.type === "bomber") {
     const c = cityAt(x, y);
-    const foe = unitsAt(x, y).some((u) => u.owner !== 0) || (c && c.owner !== 0);
+    const foe = unitsAt(x, y).some((u) => u.owner !== cur) || (c && c.owner !== cur);
     if (foe && Math.max(Math.abs(sel.x - x), Math.abs(sel.y - y)) <= 2) bombard(sel.id, x, y);
     bombMode = false;
     save();
     refresh();
     return;
   }
-  if (sel && sel.owner === 0) {
+  if (sel && sel.owner === cur) {
     if (sel.x === x && sel.y === y) { S.sel = null; refresh(); return; }
     const reach = reachable(sel);
     if (reach.has(key(x, y))) {
-      const enemies = unitsAt(x, y).some((u) => u.owner !== 0) ||
-        (cityAt(x, y) && cityAt(x, y).owner !== 0);
+      const enemies = unitsAt(x, y).some((u) => u.owner !== cur) ||
+        (cityAt(x, y) && cityAt(x, y).owner !== cur);
       if (enemies) attack(sel, x, y);
       else moveUnit(sel, x, y);
       if (S.sel && !unitById(S.sel)) S.sel = null;
@@ -118,13 +121,13 @@ function onTileClick(x, y) {
       return;
     }
   }
-  const mine = unitsAt(x, y).filter((u) => u.owner === 0);
+  const mine = unitsAt(x, y).filter((u) => u.owner === cur);
   if (mine.length) {
     S.sel = nextInStack(mine, S.sel).id;
   } else {
     S.sel = null;
     const c = cityAt(x, y);
-    if (c && c.owner === 0 && getVisible()[key(x, y)]) showCity(c);
+    if (c && c.owner === cur && getVisible()[key(x, y)]) showCity(c);
   }
   refresh();
 }
@@ -137,18 +140,21 @@ function onTileRightClick() {
 
 function sciTotal() {
   const S = getState();
-  return S.cities.filter((c) => c.owner === 0).reduce((a, c) => a + cityYields(c).sci, 0);
+  const cur = S.currentPlayer ?? 0;
+  return S.cities.filter((c) => c.owner === cur).reduce((a, c) => a + cityYields(c).sci, 0);
 }
 
 function renderTopbar() {
   const S = getState();
-  const p = S.players[0];
+  const cur = S.currentPlayer ?? 0;
+  const multi = (Array.isArray(S.humanOrder) ? S.humanOrder : [0]).length > 1;
+  const p = S.players[cur];
   const res = p.researching ? TECHS[p.researching] : null;
   const pct = res ? Math.min(100, Math.round((p.progress / res.cost) * 100)) : 0;
-  const gold = playerGoldPerTurn(0);
+  const gold = playerGoldPerTurn(cur);
   const goldStrike = p.gold === 0 && gold.net < 0;
   const netStr = `${gold.net >= 0 ? "+" : ""}${gold.net}`;
-  const happinessTotal = S.cities.filter((c) => c.owner === 0)
+  const happinessTotal = S.cities.filter((c) => c.owner === cur)
     .reduce((a, c) => a + (c.happy ?? 1) - (c.unhappy ?? 0), 0);
   const council = councilSupport();
   const el = document.getElementById("civ-top");
@@ -156,14 +162,14 @@ function renderTopbar() {
   el.innerHTML = `
     <div class="topbar-row">
       <button class="back" id="civ-home">⌂</button>
-      <h1>Цивилизация · ход ${S.turn}<span class="civ-diff">${(DIFFICULTIES[S.difficulty] || DIFFICULTIES[1]).title}</span></h1>
+      <h1>Цивилизация · ход ${S.turn}<span class="civ-diff">${(DIFFICULTIES[S.difficulty] || DIFFICULTIES[1]).title}</span>${multi ? `<span class="civ-diff"><i class="civ-dot" style="background:${p.color}"></i>${escapeHtml(p.name)}</span>` : ""}</h1>
       <div class="civ-sci">
         ${res ? `🔬 ${res.name} ${pct}%` : "🔬 выберите технологию"}
         <div class="civ-sci-bar"><div style="width:${pct}%"></div></div>
       </div>
       <div class="civ-sci civ-gold" title="Золото: доход ${gold.income}🪙 − содержание ${gold.upkeep}🪙 = ${netStr}🪙 за ход">🪙 ${p.gold} (${netStr})${goldStrike ? ` <span class="civ-warn">⚠ наука остановлена</span>` : ""}</div>
-      <div class="civ-cult" title="Легендарные города: ${legendaryCities(0).length} из ${CULTURE_WIN_CITIES}">🏛 ${legendaryCities(0).length}/${CULTURE_WIN_CITIES}</div>
-      <div class="civ-cult" title="Космический корабль">🚀 ${(S.space[0] || []).length}/${Object.keys(SS_PARTS).length}</div>
+      <div class="civ-cult" title="Легендарные города: ${legendaryCities(cur).length} из ${CULTURE_WIN_CITIES}">🏛 ${legendaryCities(cur).length}/${CULTURE_WIN_CITIES}</div>
+      <div class="civ-cult" title="Космический корабль">🚀 ${(S.space[cur] || []).length}/${Object.keys(SS_PARTS).length}</div>
       ${council ? `<div class="civ-cult" title="Поддержка во Всемирном совете">🤝 ${Math.round((100 * council.votes) / council.total)}%</div>` : ""}
       <div class="civ-cult" title="Суммарное счастье городов: счастье − недовольство">😊 ${happinessTotal >= 0 ? "+" : ""}${happinessTotal}</div>
     </div>
@@ -186,11 +192,16 @@ function renderTopbar() {
   document.getElementById("civ-religion").onclick = showReligion;
   document.getElementById("civ-gov").onclick = showGov;
   document.getElementById("civ-tech").onclick = showTech;
-  document.getElementById("civ-end").onclick = () => { endTurn(); refresh(); };
+  document.getElementById("civ-end").onclick = () => {
+    const r = finishTurn();
+    if (r && r.handoff !== null && !getState().over) { showHandoff(); return; }
+    refresh();
+  };
 }
 
 function renderPanel() {
   const S = getState();
+  const cur = S.currentPlayer ?? 0;
   const el = document.getElementById("civ-panel");
   if (!el) return;
   const sel = S.sel ? unitById(S.sel) : null;
@@ -198,7 +209,7 @@ function renderPanel() {
   if (sel) {
     const u = UNITS[sel.type];
     const t = TERRAIN[S.map[key(sel.x, sel.y)]];
-    const stack = unitsAt(sel.x, sel.y).filter((x) => x.owner === 0);
+    const stack = unitsAt(sel.x, sel.y).filter((x) => x.owner === cur);
     const stackInfo = stack.length > 1 ? ` <span class="civ-terr">Юнит ${stack.findIndex((x) => x.id === sel.id) + 1} из ${stack.length}</span>` : "";
     body = `
       <div class="civ-unit">
@@ -207,7 +218,7 @@ function renderPanel() {
       </div>`;
     if (sel.type === "settler" && !cityAt(sel.x, sel.y) && TERRAIN[S.map[key(sel.x, sel.y)]].passable) {
       const tOwner = S.tileOwner ? S.tileOwner[key(sel.x, sel.y)] : -1;
-      if (tOwner === -1 || tOwner === 0) body += `<button class="btn primary" id="civ-found">Основать город</button>`;
+      if (tOwner === -1 || tOwner === cur) body += `<button class="btn primary" id="civ-found">Основать город</button>`;
     }
     if (sel.type === "worker") {
       const wk = key(sel.x, sel.y);
@@ -223,7 +234,7 @@ function renderPanel() {
         const busy = S.impr ? !!S.impr[wk] : false;
         const reason = (kind) => {
           if (onCity) return "Под клеткой расположен город";
-          if (tOwner !== 0) return "Улучшения строятся только на своей территории";
+          if (tOwner !== cur) return "Улучшения строятся только на своей территории";
           if (busy) return "Клетка уже улучшена";
           if (sel.moves <= 0) return "Нет ходов";
           if (kind === "farm" && terr !== TILE.GRASS && terr !== TILE.PLAINS) return "Ферма строится на лугах или равнине";
@@ -241,41 +252,41 @@ function renderPanel() {
       const mCity = cityAt(sel.x, sel.y);
       let why = "";
       if (!mCity) why = "Миссионер должен быть в городе";
-      else if (mCity.owner !== 0 && atWar(0, mCity.owner)) why = "В военное время вера не распространяется";
+      else if (mCity.owner !== cur && atWar(cur, mCity.owner)) why = "В военное время вера не распространяется";
       body += `<button class="btn primary" id="civ-spread" ${why ? `disabled title="${why}"` : ""}>🕯 Распространить веру</button>`;
     }
     if (sel.type === "bomber") {
       body += `<button class="btn primary" id="civ-bomb" ${sel.moves <= 0 ? "disabled" : `title="выберите вражескую цель в радиусе 2"`}>${bombMode ? "💣 Выбор цели… (клик мимо — отмена)" : "💣 Бомбардировать (радиус 2)"}</button>`;
     }
     const ownCity = cityAt(sel.x, sel.y);
-    if (ownCity && ownCity.owner === 0) {
+    if (ownCity && ownCity.owner === cur) {
       body += `<button class="btn text" id="civ-city">🏛 Открыть город</button>`;
     }
     if (u.gp) {
       const gpDef = GREAT_PEOPLE[u.gp];
-      const inOwnCity = ownCity && ownCity.owner === 0;
+      const inOwnCity = ownCity && ownCity.owner === cur;
       const gpBlocked = u.gp !== "scientist" && u.gp !== "general" && !inOwnCity;
       body += `<button class="btn primary" id="civ-gp" ${gpBlocked ? `disabled title="Великий человек должен быть в своём городе"` : `title="${gpDef.desc}"`}>✨ ${gpDef.desc}</button>`;
     }
     const upTo = u.upgrade ? UNITS[u.upgrade] : null;
     if (upTo) {
       const price = upgradeCost(sel);
-      const onOwn = (ownCity && ownCity.owner === 0) ||
-        (S.tileOwner && S.tileOwner[key(sel.x, sel.y)] === 0);
+      const onOwn = (ownCity && ownCity.owner === cur) ||
+        (S.tileOwner && S.tileOwner[key(sel.x, sel.y)] === cur);
       let upTitle = "";
       if (!onOwn) upTitle = "Апгрейд доступен только на своей территории";
-      else if (!unitAvailable(0, u.upgrade))
-        upTitle = upTo.tech && !S.players[0].techs.includes(upTo.tech)
+      else if (!unitAvailable(cur, u.upgrade))
+        upTitle = upTo.tech && !S.players[cur].techs.includes(upTo.tech)
           ? `Не изучена технология: ${TECHS[upTo.tech].name}`
           : `Нужен ресурс в границах: ${(upTo.res || []).map((r) => RESOURCES[r].name).join(", ")}`;
-      else if (S.players[0].gold < price) upTitle = `Мало золота: нужно ${price}🪙`;
+      else if (S.players[cur].gold < price) upTitle = `Мало золота: нужно ${price}🪙`;
       body += `<button class="btn text" id="civ-up" ${upTitle ? `disabled title="${upTitle}"` : ""}>⬆ Улучшить до ${upTo.name} за ${price}🪙</button>`;
     }
     if (sel.moves > 0) {
       body += `<button class="btn text" id="civ-skip">Пропустить ход</button>`;
     }
   }
-  const myCities = S.cities.filter((c) => c.owner === 0);
+  const myCities = S.cities.filter((c) => c.owner === cur);
   if (myCities.some((c) => !c.producing)) {
     body += `<div class="civ-warn">⚠ В городе не выбрано производство — кликните город</div>`;
   }
@@ -314,9 +325,10 @@ function renderPanel() {
   };
   const cb = document.getElementById("civ-city");
   if (cb) cb.onclick = () => {
-    const u = unitById(getState().sel);
+    const st = getState();
+    const u = unitById(st.sel);
     const c = u && cityAt(u.x, u.y);
-    if (c) showCity(c);
+    if (c && c.owner === (st.currentPlayer ?? 0)) showCity(c);
   };
   const ub = document.getElementById("civ-up");
   if (ub) ub.onclick = () => {
@@ -344,7 +356,7 @@ function renderPanel() {
 function refresh() {
   renderTopbar();
   renderPanel();
-  if (renderer) renderer.draw(buildViewModel());
+  if (renderer && !handoffOpen) renderer.draw(buildViewModel());
   renderOver();
   renderElectionModal();
   const te = document.getElementById("civ-tilt");
@@ -360,14 +372,15 @@ function onTileHover(x, y) {
   const tip = document.getElementById("civ-tiletip");
   if (!tip) return;
   const S = getState();
-  if (!inMap(x, y) || !S.players[0].explored[key(x, y)]) {
+  const cur = S.currentPlayer ?? 0;
+  if (!inMap(x, y) || !S.players[cur].explored[key(x, y)]) {
     tip.classList.remove("show");
     lastTipKey = "";
     return;
   }
   const k = key(x, y);
   const vis = getVisible();
-  const units = unitsAt(x, y).filter((u) => u.owner === 0 || vis[k]);
+  const units = unitsAt(x, y).filter((u) => u.owner === cur || vis[k]);
   const tk = `${x}:${y}:${S.turn}:${units.map((u) => u.id + ":" + u.moves).join(",")}`;
   if (tk === lastTipKey) return;
   lastTipKey = tk;
@@ -411,7 +424,7 @@ function showWorldMap() {
   rootEl.appendChild(m);
   const cv = document.getElementById("civ-worldmap-canvas");
   const ctx = cv.getContext("2d");
-  const expl = S.players[0].explored;
+  const expl = S.players[S.currentPlayer ?? 0].explored;
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
       const k = key(x, y);
@@ -450,7 +463,7 @@ function renderElectionModal() {
   electionModalShown = last;
   const alive = (i) => S.cities.some((c) => c.owner === i) || S.units.some((u) => u.owner === i && u.type === "settler");
   const dots = (arr) => arr.map((i) => (S.players[i] ? `<i class="civ-dot" style="background:${S.players[i].color}" title="${escapeHtml(S.players[i].name)}"></i>` : "")).join(" ");
-  const winner = S.players[last.winner] || S.players[0];
+  const winner = S.players[last.winner] || S.players[S.currentPlayer ?? 0];
   const m = document.createElement("div");
   m.className = "civ-modal";
   m.id = "civ-modal";
@@ -479,9 +492,10 @@ function renderOver() {
     rootEl.appendChild(el);
   }
   const type = S.over.type === "culture" ? "culture" : S.over.type === "space" ? "space" : S.over.type === "diplomacy" ? "diplomacy" : "conquest";
+  const cur = S.currentPlayer ?? 0;
   const draw = S.over.winner === -1;
-  const win = !draw && S.over.winner === 0;
-  const winner = S.players[S.over.winner] || S.players[0];
+  const win = !draw && S.over.winner === cur;
+  const winner = S.players[S.over.winner] || S.players[cur];
   const dipElection = (S.elections || []).filter((e) => e.winner === S.over.winner).pop() || null;
   const dipPct = dipElection && dipElection.total ? Math.round((100 * dipElection.votes) / dipElection.total) : 0;
   const title = draw ? "🤝 Ничья"
@@ -501,14 +515,14 @@ function renderOver() {
     : type === "space" ? `Космический корабль собран за ${S.turn} ходов.`
     : type === "diplomacy" ? `Поддержка ${dipPct}% голосов на выборах хода ${dipElection ? dipElection.turn : S.turn}.`
     : "Все противники повержены.";
-  const myCities = S.cities.filter((c) => c.owner === 0);
+  const myCities = S.cities.filter((c) => c.owner === cur);
   const cultureTotal = myCities.reduce((a, c) => a + (c.culture || 0), 0);
   const cityItems = S.players
     .map((p, i) => ({ p, n: S.cities.filter((c) => c.owner === i).length }))
     .filter((r) => r.n > 0)
     .map((r) => `<span><i class="civ-dot" style="background:${r.p.color}"></i>${escapeHtml(r.p.name)}: ${r.n}</span>`)
     .join("");
-  const legends = legendaryCities(0);
+  const legends = legendaryCities(cur);
   const wonderItems = (S.wonders || []).map((w) => {
     const d = WONDERS[w.id];
     const c = cityById(w.cityId);
@@ -520,7 +534,7 @@ function renderOver() {
       <h2>${title}</h2>
       <p>${sub}</p>
       <div class="civ-summary">
-        <div class="civ-yields">Ходов: ${S.turn} · Технологий: ${S.players[0].techs.length} · Суммарная культура: ${cultureTotal}</div>
+        <div class="civ-yields">Ходов: ${S.turn} · Технологий: ${S.players[cur].techs.length} · Суммарная культура: ${cultureTotal}</div>
         <div class="civ-sum-row">Города: ${cityItems}</div>
         ${legends.length ? `<div class="civ-sum-row">Легендарные города: ${legends.map((c) => escapeHtml(c.name)).join(", ")}</div>` : ""}
         ${wonderItems ? `<div class="civ-sum-row">Чудеса света: ${wonderItems}</div>` : ""}
@@ -529,12 +543,14 @@ function renderOver() {
       <div id="civ-ng-controls"></div>
     </div>
   `;
-  newGameControls(1, 1);
+  newGameControls(1, 1, (Array.isArray(S.humanOrder) ? S.humanOrder : [0]).length);
 }
 
 function showCity(c) {
   closeModal();
   const S = getState();
+  const cur = S.currentPlayer ?? 0;
+  if (!c || c.owner !== cur) return;
   const y = cityYields(c);
   const hap = cityHappiness(c);
   const mood = c.riot
@@ -544,14 +560,14 @@ function showCity(c) {
       : hap.unhappy > hap.happy
         ? `😡 ${hap.happy - hap.unhappy}`
         : "😐 0";
-  const p = S.players[0];
+  const p = S.players[cur];
   const pressure = c.revoltPressure || 0;
   const presser = c.revoltBy != null ? (S.players[c.revoltBy] || {}).name : null;
-  const held = unitsAt(c.x, c.y).some((u) => u.owner === 0 && UNITS[u.type].atk > 0 && !UNITS[u.type].gp);
+  const held = unitsAt(c.x, c.y).some((u) => u.owner === cur && UNITS[u.type].atk > 0 && !UNITS[u.type].gp);
   const unitOpts = Object.entries(UNITS)
     .filter(([, d]) => !d.gp && (!d.tech || p.techs.includes(d.tech)) && (!d.naval || isCoastal(c.x, c.y)))
     .map(([id, d]) => {
-      const need = (d.res || []).filter((r) => !resourceConnected(0, r));
+      const need = (d.res || []).filter((r) => !resourceConnected(cur, r));
       const noRel = id === "missionary" && !c.religion;
       return {
         k: "unit", id, name: d.name, cost: d.cost,
@@ -574,7 +590,7 @@ function showCity(c) {
     };
   });
   const opts = [...unitOpts, ...bldOpts];
-  const cur = c.producing
+  const curProd = c.producing
     ? (c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : c.producing.k === "project" ? SS_PARTS[c.producing.id] : WONDERS[c.producing.id])
     : null;
   const m = document.createElement("div");
@@ -588,7 +604,7 @@ function showCity(c) {
       ${pressure > 0 ? `<div class="civ-warn">⚠ Давление ${escapeHtml(presser || "соседей")}: ${pressure}/5${held ? " · сдерживает гарнизон" : ""}</div>` : ""}
       ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeGold}🪙</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
-      ${cur ? `<div class="civ-growth">Производит: ${cur.name} (${c.prodStored}/${c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : cur.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
+      ${curProd ? `<div class="civ-growth">Производит: ${curProd.name} (${c.prodStored}/${c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : curProd.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
       ${c.buildings.length ? `<div class="civ-yields">Постройки: ${c.buildings.map((b) => BUILDINGS[b].name).join(", ")}</div>` : ""}
       ${c.religion
         ? `<div class="civ-yields">Религия: ${RELIGIONS[c.religion].icon} ${RELIGIONS[c.religion].name}${isHolyCity(c) ? " · святой город" : ""}</div>`
@@ -622,7 +638,7 @@ function showCity(c) {
       <h3>🚀 Космический корабль:</h3>
       <div class="civ-prod-list">
         ${Object.entries(SS_PARTS).map(([id, d]) => {
-          const built = (S.space[0] || []).includes(id);
+          const built = (S.space[cur] || []).includes(id);
           return `<button class="civ-prod ${c.producing && c.producing.id === id && c.producing.k === "project" ? "sel" : ""}"
                   data-k="project" data-id="${id}" ${built ? "disabled" : ""}>
             <b>${d.name}</b><span>${built ? "построено" : "часть космического корабля"}</span><span>🔨 ${d.cost}</span>
@@ -643,8 +659,8 @@ function showCity(c) {
   m.querySelectorAll(".civ-prod").forEach((b) => {
     b.onclick = () => {
       if (b.dataset.k === "wonder" && (S.wonders || []).some((w) => w.id === b.dataset.id)) return;
-      if (b.dataset.k === "project" && (S.space[0] || []).includes(b.dataset.id)) return;
-      if (b.dataset.k === "unit" && !unitAvailable(0, b.dataset.id)) return;
+      if (b.dataset.k === "project" && (S.space[cur] || []).includes(b.dataset.id)) return;
+      if (b.dataset.k === "unit" && !unitAvailable(cur, b.dataset.id)) return;
       if (b.dataset.k === "unit" && b.dataset.id === "missionary" && !c.religion) return;
       c.producing = { k: b.dataset.k, id: b.dataset.id };
       save();
@@ -657,7 +673,7 @@ function showCity(c) {
 function showTech() {
   closeModal();
   const S = getState();
-  const p = S.players[0];
+  const p = S.players[S.currentPlayer ?? 0];
   const m = document.createElement("div");
   m.className = "civ-modal";
   m.id = "civ-modal";
@@ -701,10 +717,11 @@ function toggleArr(arr, v) { return arr.includes(v) ? arr.filter((x) => x !== v)
 function showDiplo() {
   closeModal();
   const S = getState();
-  const me = S.players[0];
+  const cur = S.currentPlayer ?? 0;
+  const me = S.players[cur];
   const dt = diploTrade;
-  const pt = S.pendingTribute && S.players[S.pendingTribute.ai] ? S.pendingTribute : null;
-  const pm = S.pendingMapOffer && S.players[S.pendingMapOffer.ai] ? S.pendingMapOffer : null;
+  const pt = S.pendingTribute && (S.pendingTribute.target ?? 0) === cur && S.players[S.pendingTribute.ai] ? S.pendingTribute : null;
+  const pm = S.pendingMapOffer && (S.pendingMapOffer.target ?? 0) === cur && S.players[S.pendingMapOffer.ai] ? S.pendingMapOffer : null;
   const pmCard = pm ? `
       <div class="civ-prod">
         <b>🗺 ${escapeHtml(S.players[pm.ai].name)} предлагают купить их карту</b>
@@ -732,20 +749,19 @@ function showDiplo() {
       ${ptCard}
       ${pmCard}
       <div class="civ-prod-list">
-        ${S.players.slice(1).map((p, idx) => {
-          const i = idx + 1;
-          const rel = (S.relations || {})[relKey(0, i)] || { war: false, since: -1 };
+        ${S.players.map((p, i) => ({ p, i })).filter(({ i }) => i !== cur).map(({ p, i }) => {
+          const rel = (S.relations || {})[relKey(cur, i)] || { war: false, since: -1 };
           const status = rel.war ? `⚔ война с хода ${rel.since}` : "🕊 мир";
           const cd = 10 - (S.turn - (rel.lastTradeTurn ?? -99));
           const cooldown = !rel.war && cd > 0;
           const open = !rel.war && dt.open === i;
           const mine = me.techs.filter((t) => !p.techs.includes(t));
           const theirs = p.techs.filter((t) => !me.techs.includes(t));
-          const myRes = Object.keys(RESOURCES).filter((r) => resourceOwned(0, r));
+          const myRes = Object.keys(RESOURCES).filter((r) => resourceOwned(cur, r));
           const theirRes = Object.keys(RESOURCES).filter((r) => resourceOwned(i, r));
-          const tin = (S.tributes || {})[`${i}:0`];
-          const tout = (S.tributes || {})[`0:${i}`];
-          const pairDeals = (S.resDeals || []).filter((d) => (d.from === 0 && d.to === i) || (d.from === i && d.to === 0));
+          const tin = (S.tributes || {})[`${i}:${cur}`];
+          const tout = (S.tributes || {})[`${cur}:${i}`];
+          const pairDeals = (S.resDeals || []).filter((d) => (d.from === cur && d.to === i) || (d.from === i && d.to === cur));
           const summaryBits = [];
           if (tin) summaryBits.push(`Получаете дань ${tin.amount}🪙/ход (ост. ${tin.turnsLeft})`);
           if (tout) summaryBits.push(`Платите дань ${tout.amount}🪙/ход (ост. ${tout.turnsLeft})`);
@@ -756,11 +772,11 @@ function showDiplo() {
             .map((g) => `<button class="civ-prod ${cur === g ? "sel" : ""}" data-${who}-gold="${g}"><b>${g}🪙</b></button>`).join("") +
             (treasury > 0 ? `<button class="civ-prod ${cur === treasury ? "sel" : ""}" data-${who}-gold="${treasury}"><b>всё ${treasury}🪙</b></button>` : "");
           const resBtns = (cur, who, list) => list.map((r) => `<button class="civ-prod ${cur.includes(r) ? "sel" : ""}" data-${who}-res="${r}"><b>${RESOURCES[r].icon} ${RESOURCES[r].name}</b><span>ресурс</span></button>`).join("");
-          const mapBtn = (cur, who, n) => `<button class="civ-prod ${cur ? "sel" : ""}" data-${who}-map="1" ${n === 0 ? `disabled title="нечего открывать"` : ""}><b>🗺 Карта (${n} клеток)</b><span>разведанные земли</span></button>`;
-          const tributeOk = !cooldown && strengthOf(i) < 0.6 * strengthOf(0);
+          const mapBtn = (cur2, who, n) => `<button class="civ-prod ${cur2 ? "sel" : ""}" data-${who}-map="1" ${n === 0 ? `disabled title="нечего открывать"` : ""}><b>🗺 Карта (${n} клеток)</b><span>разведанные земли</span></button>`;
+          const tributeOk = !cooldown && strengthOf(i) < 0.6 * strengthOf(cur);
           const tributeTitle = cooldown
             ? `Дань доступна через ${cd} ход.`
-            : `Нужен значительный перевес силы: ${strengthOf(0)} против ${strengthOf(i)}`;
+            : `Нужен значительный перевес силы: ${strengthOf(cur)} против ${strengthOf(i)}`;
           return `<div class="civ-prod">
             <b><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${p.color};margin-right:6px;vertical-align:middle"></span>${escapeHtml(p.name)}</b>
             <span>${status} · сила: ${strengthOf(i)}</span>
@@ -783,7 +799,7 @@ function showDiplo() {
                   ${mine.length ? mine.map((t) => `<button class="civ-prod ${dt.giveTech === t ? "sel" : ""}" data-give-tech="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий</span>"}
                   ${goldBtns(dt.giveGold, "give", me.gold)}
                   ${myRes.length ? resBtns(dt.giveRes, "give", myRes) : ""}
-                  ${mapBtn(dt.giveMap, "give", mapValue(0, i))}
+                  ${mapBtn(dt.giveMap, "give", mapValue(cur, i))}
                 </div>
               </div>
               <div style="flex:1;min-width:180px"><b>Прошу:</b>
@@ -791,7 +807,7 @@ function showDiplo() {
                   ${theirs.length ? theirs.map((t) => `<button class="civ-prod ${dt.wantTech === t ? "sel" : ""}" data-want-tech="${t}"><b>${TECHS[t].name}</b><span>🔬 ${TECHS[t].cost}</span></button>`).join("") : "<span>нет технологий</span>"}
                   ${goldBtns(dt.wantGold, "want", p.gold)}
                   ${theirRes.length ? resBtns(dt.wantRes, "want", theirRes) : ""}
-                  ${mapBtn(dt.wantMap, "want", mapValue(i, 0))}
+                  ${mapBtn(dt.wantMap, "want", mapValue(i, cur))}
                 </div>
               </div>
             </div>
@@ -815,8 +831,9 @@ function showDiplo() {
     const st = getState();
     const pd = st.pendingTribute;
     if (!pd) return;
+    const who = pd.target ?? 0;
     if (!st.tributes) st.tributes = {};
-    st.tributes[`0:${pd.ai}`] = { amount: pd.amount, turnsLeft: 10 };
+    st.tributes[`${who}:${pd.ai}`] = { amount: pd.amount, turnsLeft: 10 };
     st.pendingTribute = null;
     save();
     refresh();
@@ -828,7 +845,7 @@ function showDiplo() {
     const pd = st.pendingTribute;
     if (!pd) return;
     st.pendingTribute = null;
-    declareWar(pd.ai, 0);
+    declareWar(pd.ai, pd.target ?? 0);
     save();
     refresh();
     showDiplo();
@@ -838,7 +855,7 @@ function showDiplo() {
     const st = getState();
     const pd = st.pendingMapOffer;
     if (!pd) return;
-    const meP = st.players[0], aiP = st.players[pd.ai];
+    const meP = st.players[pd.target ?? 0], aiP = st.players[pd.ai];
     if (meP.gold < pd.price) return;
     meP.gold -= pd.price;
     aiP.gold += pd.price;
@@ -860,8 +877,8 @@ function showDiplo() {
   m.querySelectorAll("[data-war]").forEach((b) => {
     b.onclick = () => {
       const i = Number(b.dataset.war);
-      if (atWar(0, i)) return;
-      declareWar(0, i);
+      if (atWar(cur, i)) return;
+      declareWar(cur, i);
       save();
       showDiplo();
       refresh();
@@ -869,7 +886,7 @@ function showDiplo() {
   });
   m.querySelectorAll("[data-peace]").forEach((b) => {
     b.onclick = () => {
-      offerPeace(0, Number(b.dataset.peace));
+      offerPeace(cur, Number(b.dataset.peace));
       save();
       showDiplo();
       refresh();
@@ -945,7 +962,7 @@ function showDiplo() {
       if (diploTrade.wantGold > 0) get.gold = diploTrade.wantGold;
       if (diploTrade.wantRes.length) get.res = [...diploTrade.wantRes];
       if (diploTrade.wantMap) get.map = true;
-      const r = offerDeal(0, i, { give, get });
+      const r = offerDeal(cur, i, { give, get });
       diploTrade.status = r.ok ? "Сделка состоялась" : `Отказ: ${r.reason}`;
       if (r.ok) {
         diploTrade.giveTech = null;
@@ -965,7 +982,7 @@ function showDiplo() {
   m.querySelectorAll("[data-tribute]").forEach((b) => {
     b.onclick = () => {
       const i = Number(b.dataset.tribute);
-      const r = demandTribute(0, i);
+      const r = demandTribute(cur, i);
       diploTrade.status = r.ok ? `Дань назначена: ${r.amount}🪙/ход на 10 ходов` : `Отказ: ${r.reason}`;
       if (r.ok) {
         save();
@@ -979,12 +996,13 @@ function showDiplo() {
 function showReligion() {
   closeModal();
   const S = getState();
+  const cur = S.currentPlayer ?? 0;
   const founded = S.religions || [];
-  const mine = founded.find((r) => r.owner === 0) || null;
+  const mine = founded.find((r) => r.owner === cur) || null;
   const mineHoly = mine ? cityById(mine.holyCityId) : null;
-  const myRelCities = S.cities.filter((c) => c.owner === 0 && c.religion);
-  const cur = S.players[0].stateReligion || null;
-  const present = Object.entries(RELIGIONS).filter(([id]) => S.cities.some((c) => c.owner === 0 && c.religion === id));
+  const myRelCities = S.cities.filter((c) => c.owner === cur && c.religion);
+  const curRel = S.players[cur].stateReligion || null;
+  const present = Object.entries(RELIGIONS).filter(([id]) => S.cities.some((c) => c.owner === cur && c.religion === id));
   const m = document.createElement("div");
   m.className = "civ-modal";
   m.id = "civ-modal";
@@ -1009,15 +1027,15 @@ function showReligion() {
         }).join("")}
       </div>
       <h3>Государственная религия</h3>
-      ${cur
-        ? `<div class="civ-yields">Объявлена: ${RELIGIONS[cur].icon} ${RELIGIONS[cur].name} — +1 счастье и +1 культура в городах с этой религией, +2 золота от святого города</div>`
+      ${curRel
+        ? `<div class="civ-yields">Объявлена: ${RELIGIONS[curRel].icon} ${RELIGIONS[curRel].name} — +1 счастье и +1 культура в городах с этой религией, +2 золота от святого города</div>`
         : `<div class="civ-yields">Не объявлена. Эффекты: +1 счастье и +1 культура в городах с государственной религией, +2 золота от святого города, дипломатия зависит от веры соседей</div>`}
       <div class="civ-prod-list">
         ${present.length ? present.map(([id, r]) => `
-          <button class="civ-prod ${cur === id ? "sel" : ""}" data-rel="${id}" ${cur === id ? "disabled" : ""}>
-            <b>${cur === id ? "✓ " : ""}${r.icon} ${r.name}</b>
-            <span>${cur === id ? "государственная религия" : "Сделать государственной"}</span>
-            <span>городов: ${S.cities.filter((c) => c.owner === 0 && c.religion === id).length}</span>
+          <button class="civ-prod ${curRel === id ? "sel" : ""}" data-rel="${id}" ${curRel === id ? "disabled" : ""}>
+            <b>${curRel === id ? "✓ " : ""}${r.icon} ${r.name}</b>
+            <span>${curRel === id ? "государственная религия" : "Сделать государственной"}</span>
+            <span>городов: ${S.cities.filter((c) => c.owner === cur && c.religion === id).length}</span>
           </button>`).join("") : `<div class="civ-yields">Ни одна религия не присутствует в ваших городах</div>`}
       </div>
       <div class="civ-yields">Ваши религиозные города: ${myRelCities.length ? myRelCities.map((c) => `${escapeHtml(c.name)} ${RELIGIONS[c.religion].icon}`).join(", ") : "нет"}</div>
@@ -1028,7 +1046,7 @@ function showReligion() {
   document.getElementById("civ-close").onclick = closeModal;
   m.querySelectorAll("[data-rel]").forEach((b) => {
     b.onclick = () => {
-      declareStateReligion(0, b.dataset.rel);
+      declareStateReligion(cur, b.dataset.rel);
       save();
       showReligion();
       refresh();
@@ -1039,8 +1057,9 @@ function showReligion() {
 function showGov() {
   closeModal();
   const S = getState();
-  const p = S.players[0];
-  const cur = GOVERNMENTS[p.government] || GOVERNMENTS.despotism;
+  const cur = S.currentPlayer ?? 0;
+  const p = S.players[cur];
+  const curGov = GOVERNMENTS[p.government] || GOVERNMENTS.despotism;
   const inAnarchy = p.anarchy > 0;
   const pending = inAnarchy && p.pendingGov && GOVERNMENTS[p.pendingGov] ? GOVERNMENTS[p.pendingGov] : null;
   const m = document.createElement("div");
@@ -1051,7 +1070,7 @@ function showGov() {
       <h2>⚖ Госустройство</h2>
       ${inAnarchy
         ? `<div class="civ-warn">Анархия: осталось ${p.anarchy} ход(а)${pending ? ` — готовится ${pending.icon} ${pending.name}` : ""}</div>`
-        : `<div class="civ-yields">Текущее устройство: ${cur.icon} ${cur.name} — ${cur.desc}</div>`}
+        : `<div class="civ-yields">Текущее устройство: ${curGov.icon} ${curGov.name} — ${curGov.desc}</div>`}
       <div class="civ-prod-list">
         ${Object.entries(GOVERNMENTS).map(([id, g]) => {
           const active = p.government === id && !inAnarchy;
@@ -1073,7 +1092,7 @@ function showGov() {
   document.getElementById("civ-close").onclick = closeModal;
   m.querySelectorAll("[data-gov]").forEach((b) => {
     b.onclick = () => {
-      startRevolution(0, b.dataset.gov);
+      startRevolution(cur, b.dataset.gov);
       save();
       showGov();
       refresh();
@@ -1086,25 +1105,74 @@ function closeModal() {
   if (m) m.remove();
 }
 
-function newGameControls(selectedDiff = 1, selectedOpps = 1, onDone) {
+let handoffOpen = false;
+
+function showHandoff() {
+  const S = getState();
+  if (S.over) return;
+  const cur = S.currentPlayer ?? 0;
+  const p = S.players[cur];
+  if (!p) return;
+  S.sel = null;
+  closeModal();
+  handoffOpen = true;
+  const m = document.createElement("div");
+  m.className = "civ-modal civ-handoff";
+  m.id = "civ-handoff";
+  m.innerHTML = `
+    <div class="civ-dialog">
+      <h2><i class="civ-dot" style="background:${p.color}"></i>Ход игрока: ${escapeHtml(p.name)}</h2>
+      <p>Передайте устройство. Карта и планы предыдущего игрока скрыты.</p>
+      <button class="btn primary" id="civ-handoff-go">Начать ход</button>
+    </div>
+  `;
+  rootEl.appendChild(m);
+  const go = document.getElementById("civ-handoff-go");
+  if (go) go.onclick = () => {
+    m.remove();
+    handoffOpen = false;
+    computeVision();
+    refresh();
+  };
+}
+
+function afterTurnStart() {
+  const S = getState();
+  if ((Array.isArray(S.humanOrder) ? S.humanOrder : [0]).length > 1) { showHandoff(); return; }
+  refresh();
+}
+
+function newGameControls(selectedDiff = 1, selectedOpps = 1, selectedHumans = 1, onDone) {
   const holder = document.getElementById("civ-ng-controls");
   if (!holder) return;
   const oppBtns = [1, 2, 3, 4];
+  const humanBtns = [1, 2, 3, 4];
+  const maxOpps = () => Math.max(1, Math.min(4, 5 - selectedHumans));
   const sync = () => {
     DIFFICULTIES.forEach((d, i) => {
       const b = document.getElementById(`civ-ng-diff-${i}`);
       if (b) b.className = `btn ${i === selectedDiff ? "primary" : "text"}`;
     });
+    for (const n of humanBtns) {
+      const b = document.getElementById(`civ-ng-hum-${n}`);
+      if (b) b.className = `btn ${n === selectedHumans ? "primary" : "text"}`;
+    }
     for (const n of oppBtns) {
       const b = document.getElementById(`civ-ng-opp-${n}`);
-      if (b) b.className = `btn ${n === selectedOpps ? "primary" : "text"}`;
+      if (b) {
+        b.className = `btn ${n === selectedOpps ? "primary" : "text"}`;
+        b.disabled = n > maxOpps();
+      }
     }
   };
   holder.innerHTML = `
     <p>Сложность:</p>
     <div class="civ-diff-btns">${DIFFICULTIES.map((d, i) =>
       `<button class="btn ${i === selectedDiff ? "primary" : "text"}" id="civ-ng-diff-${i}">${d.title}</button>`).join("")}</div>
-    <p>Противники:</p>
+    <p>Люди за устройством:</p>
+    <div class="civ-diff-btns">${humanBtns.map((n) =>
+      `<button class="btn ${n === selectedHumans ? "primary" : "text"}" id="civ-ng-hum-${n}">${n}</button>`).join("")}</div>
+    <p>Противники-ИИ:</p>
     <div class="civ-diff-btns">${oppBtns.map((n) =>
       `<button class="btn ${n === selectedOpps ? "primary" : "text"}" id="civ-ng-opp-${n}">${n}</button>`).join("")}</div>
     <button class="btn primary" id="civ-ng-go">Начать игру</button>
@@ -1113,12 +1181,25 @@ function newGameControls(selectedDiff = 1, selectedOpps = 1, onDone) {
     const b = document.getElementById(`civ-ng-diff-${i}`);
     if (b) b.onclick = () => { selectedDiff = i; sync(); };
   });
+  for (const n of humanBtns) {
+    const b = document.getElementById(`civ-ng-hum-${n}`);
+    if (b) b.onclick = () => {
+      selectedHumans = n;
+      if (selectedOpps > maxOpps()) selectedOpps = maxOpps();
+      sync();
+    };
+  }
   for (const n of oppBtns) {
     const b = document.getElementById(`civ-ng-opp-${n}`);
-    if (b) b.onclick = () => { selectedOpps = n; sync(); };
+    if (b) b.onclick = () => { if (n > maxOpps()) return; selectedOpps = n; sync(); };
   }
   const go = document.getElementById("civ-ng-go");
-  if (go) go.onclick = () => { newGame(selectedDiff, selectedOpps); if (onDone) onDone(); refresh(); };
+  if (go) go.onclick = () => {
+    newGame(selectedDiff, selectedOpps, selectedHumans);
+    if (onDone) onDone();
+    afterTurnStart();
+  };
+  sync();
 }
 
 function showStart(showContinue) {
@@ -1137,7 +1218,7 @@ function showStart(showContinue) {
   rootEl.appendChild(m);
   const cont = document.getElementById("civ-continue");
   if (cont) cont.onclick = () => m.remove();
-  newGameControls(1, 1, () => m.remove());
+  newGameControls(1, 1, 1, () => m.remove());
 }
 
 function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
@@ -1193,8 +1274,12 @@ export const civApp = {
     computeVision();
     refresh();
     showStart(hadSave && !getState().over);
+    if (!getState().over && (Array.isArray(getState().humanOrder) ? getState().humanOrder : [0]).length > 1) showHandoff();
     return () => {
       closeModal();
+      const ho = document.getElementById("civ-handoff");
+      if (ho) ho.remove();
+      handoffOpen = false;
       const ov = document.getElementById("civ-over");
       if (ov) ov.remove();
       const st = document.getElementById("civ-start");

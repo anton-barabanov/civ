@@ -309,3 +309,10 @@ body {
   margin-right: 5px;
   vertical-align: middle;
 }
+
+.civ-handoff {
+  background: var(--bg);
+  z-index: 80;
+}
+.civ-handoff .civ-dialog { align-items: center; text-align: center; max-width: 380px; }
+.btn:disabled { opacity: 0.4; cursor: default; }

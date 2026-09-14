@@ -383,7 +383,7 @@ export async function createRenderer3D(container, handlers) {
       e.ty = u.y;
       e.holder.position.set(px, e.baseY, pz);
       e.ring.position.y = water ? 0.06 : 0.012;
-      e.ring.visible = u.owner === 0 && u.movesLeft > 0;
+      e.ring.visible = u.owner === vm.currentPlayer && u.movesLeft > 0;
     }
     for (const [id, e] of unitHolders) {
       if (seenU.has(id)) continue;
