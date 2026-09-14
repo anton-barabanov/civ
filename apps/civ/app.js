@@ -506,9 +506,19 @@ function showWorldMap() {
   }
   const t = renderer && renderer.getTarget ? renderer.getTarget() : null;
   if (t && inMap(t.x, t.y)) {
+    const ext = renderer && renderer.getViewExtent ? renderer.getViewExtent() : null;
     ctx.strokeStyle = "#ffe14d";
     ctx.lineWidth = 2;
-    ctx.strokeRect(t.x * px - 6, t.y * px - 6, px + 12, px + 12);
+    if (ext) {
+      const halfTw = ext.vw / 2, halfTh = ext.vh / 2;
+      const x0 = (t.x - halfTw + 0.5) * px;
+      const y0 = (t.y - halfTh + 0.5) * px;
+      const w = Math.min(ext.vw, W) * px;
+      const h = Math.min(ext.vh, H) * px;
+      ctx.strokeRect(Math.max(1, x0), Math.max(1, y0), Math.min(w, W * px - 2), Math.min(h, H * px - 2));
+    } else {
+      ctx.strokeRect(t.x * px - 6, t.y * px - 6, px + 12, px + 12);
+    }
   }
   cv.onclick = (e) => {
     const r = cv.getBoundingClientRect();

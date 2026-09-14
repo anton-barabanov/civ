@@ -112,10 +112,44 @@ export async function createRenderer3D(container, handlers) {
     applyCamera();
   }
 
-  function zoom(deltaY) {
-    orbit.radius = Math.max(R_MIN, Math.min(R_MAX, orbit.radius * (1 + deltaY * 0.001)));
+  function getViewExtent() {
+    const t = Math.tan(camera.fov * Math.PI / 360);
+    return { vw: 2 * orbit.radius * t * (camera.aspect || 1), vh: 2 * orbit.radius * t };
+  }
+
+  function zoomAt(deltaY, px, py) {
+    const oldR = orbit.radius;
+    const newR = Math.max(R_MIN, Math.min(R_MAX, oldR * (1 + deltaY * 0.001)));
+    if (px !== undefined && py !== undefined) {
+      const r0 = canvas.getBoundingClientRect();
+      if (r0.width && r0.height) {
+        const ndcX = ((px - r0.left) / r0.width) * 2 - 1;
+        const ndcY = -((py - r0.top) / r0.height) * 2 + 1;
+        const anchor = screenToWorld(ndcX, ndcY);
+        orbit.radius = newR;
+        clampTarget();
+        const shifted = screenToWorld(ndcX, ndcY);
+        orbit.target.x += anchor.x - shifted.x;
+        orbit.target.z += anchor.z - shifted.z;
+        clampTarget();
+        applyCamera();
+        return;
+      }
+    }
+    orbit.radius = newR;
     clampTarget();
     applyCamera();
+  }
+
+  function screenToWorld(nx, ny) {
+    const t = Math.tan(camera.fov * Math.PI / 360);
+    const halfH = orbit.radius * t;
+    const halfW = halfH * (camera.aspect || 1);
+    return { x: orbit.target.x + nx * halfW, z: orbit.target.z + ny * halfH };
+  }
+
+  function zoom(deltaY) {
+    zoomAt(deltaY);
   }
 
   const raycaster = new THREE.Raycaster();
@@ -209,7 +243,7 @@ export async function createRenderer3D(container, handlers) {
 
   const onWheel = (e) => {
     e.preventDefault();
-    zoom(e.deltaY);
+    zoomAt(e.deltaY, e.clientX, e.clientY);
   };
 
   const onContext = (e) => e.preventDefault();
@@ -917,5 +951,5 @@ export async function createRenderer3D(container, handlers) {
     return { x: Math.round(orbit.target.x + mapW / 2 - 0.5), y: Math.round(orbit.target.z + mapH / 2 - 0.5) };
   }
 
-  return { draw, destroy, zoom, setPhi, getPhi, setTarget, getTarget };
+  return { draw, destroy, zoom, zoomAt, setPhi, getPhi, setTarget, getTarget, getViewExtent };
 }
