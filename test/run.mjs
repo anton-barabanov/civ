@@ -1047,7 +1047,7 @@ let wErr = null;
 try { api.processEconomy(); } catch (e) { wErr = e; }
 check("wonder production stable after migration", wErr === null);
 
-check("culture win constants exposed", api.CULTURE_WIN_CITIES === 3 && api.CULTURE_WIN_THRESHOLD === 200);
+check("culture win constants exposed", api.CULTURE_WIN_CITIES === 3 && api.CULTURE_WIN_THRESHOLD === 400);
 
 const cultSpots = () => {
   const spots = [];
@@ -1064,7 +1064,7 @@ api.S.units = [];
 const cs1 = cultSpots();
 for (let i = 0; i < 3; i++) api.foundCity(api.spawn("settler", 0, cs1[i][0], cs1[i][1]));
 api.foundCity(api.spawn("settler", 1, cs1[3][0], cs1[3][1]));
-api.S.cities.filter((c) => c.owner === 0).forEach((c) => { c.culture = 200; });
+api.S.cities.filter((c) => c.owner === 0).forEach((c) => { c.culture = 400; });
 check("legendaryCities counts own cities at threshold",
   api.legendaryCities(0).length === 3 && api.legendaryCities(1).length === 0);
 api.endTurn();
@@ -1076,7 +1076,7 @@ api.S.units = [];
 const cs2 = cultSpots();
 api.foundCity(api.spawn("settler", 0, cs2[0][0], cs2[0][1]));
 for (let i = 1; i < 4; i++) api.foundCity(api.spawn("settler", 1, cs2[i][0], cs2[i][1]));
-api.S.cities.filter((c) => c.owner === 1).forEach((c) => { c.culture = 200; });
+api.S.cities.filter((c) => c.owner === 1).forEach((c) => { c.culture = 400; });
 api.endTurn();
 check("AI culture victory is player defeat", api.S.over && api.S.over.winner === 1 && api.S.over.type === "culture");
 
@@ -1084,7 +1084,7 @@ api.newGame(1);
 api.S.units = [];
 const cs3 = cultSpots();
 for (let i = 0; i < 3; i++) api.foundCity(api.spawn("settler", 1, cs3[i][0], cs3[i][1]));
-api.S.cities.forEach((c) => { c.culture = 200; });
+api.S.cities.forEach((c) => { c.culture = 400; });
 api.endTurn();
 check("conquest priority over culture", api.S.over && api.S.over.type === "conquest" && api.S.over.winner === 1);
 
@@ -1098,11 +1098,11 @@ const cs4 = cultSpots();
 for (let i = 0; i < 3; i++) api.foundCity(api.spawn("settler", 0, cs4[i][0], cs4[i][1]));
 api.foundCity(api.spawn("settler", 1, cs4[3][0], cs4[3][1]));
 const pc4 = api.S.cities.filter((c) => c.owner === 0);
-pc4[0].culture = 200;
-pc4[1].culture = 200;
-pc4[2].culture = 199;
+pc4[0].culture = 400;
+pc4[1].culture = 400;
+pc4[2].culture = 399;
 check("city below threshold not legendary", api.legendaryCities(0).length === 2);
-pc4[2].culture = 198;
+pc4[2].culture = 398;
 api.endTurn();
 check("no culture victory below threshold", api.S.over === null);
 

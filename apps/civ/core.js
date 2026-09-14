@@ -162,7 +162,7 @@ const REL_SPREAD_RADIUS = 3;
 const REL_SPREAD_THRESHOLD = 5;
 
 const CULTURE_WIN_CITIES = 3;
-const CULTURE_WIN_THRESHOLD = 200;
+const CULTURE_WIN_THRESHOLD = 400;
 
 const NATIONS = [
   { name: "Рим", color: "#4a90d9", cityNames: ["Рим", "Антиум", "Кумы", "Неаполь", "Равенна", "Арримин", "Арретий", "Медиолан"] },
