@@ -6,7 +6,7 @@ import {
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf, offerDeal, mapValue, demandTribute, resourceOwned,
   RELIGIONS, GOVERNMENTS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
-  CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
+  CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson, spyStealTech, spySabotage,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
   startImprovement, cancelWork, spreadFaith, declareStateReligion, startRevolution, councilSupport,
   BARB_ID, BARB_NAME, BARB_COLOR,
@@ -261,6 +261,21 @@ function renderPanel() {
       else if (mCity.owner !== cur && atWar(cur, mCity.owner)) why = "В военное время вера не распространяется";
       body += `<button class="btn primary" id="civ-spread" ${why ? `disabled title="${why}"` : ""}>🕯 Распространить веру</button>`;
     }
+    if (sel.type === "spy") {
+      const sCity = cityAt(sel.x, sel.y);
+      if (sCity && sCity.owner === cur) {
+        body += `<div class="civ-hint">Контрразведка: шансы вражеских миссий против этого города вдвое ниже</div>`;
+      } else if (sCity) {
+        const counter = S.units.some((o) => o.type === "spy" && o.owner === sCity.owner && o.x === sel.x && o.y === sel.y);
+        const nothing = !S.players[sCity.owner].techs.some((t) => !S.players[cur].techs.includes(t));
+        const warn = "При провале шпион погибает; возможна война";
+        body += `<button class="btn primary" id="civ-spysteal" ${nothing ? `disabled title="Нечего красть: технологии владельца вам известны"` : `title="${warn}"`}>🕵 Украсть технологию (60%)</button>`;
+        body += `<button class="btn primary" id="civ-spysab" title="${warn}">💥 Саботаж (70%)</button>`;
+        if (counter) body += `<div class="civ-warn">⚠ В городе контрразведка: шансы вдвое ниже</div>`;
+      } else {
+        body += `<div class="civ-hint">Отправьте шпиона в чужой город</div>`;
+      }
+    }
     if (sel.type === "bomber") {
       body += `<button class="btn primary" id="civ-bomb" ${sel.moves <= 0 ? "disabled" : `title="выберите вражескую цель в радиусе 2"`}>${bombMode ? "💣 Выбор цели… (клик мимо — отмена)" : "💣 Бомбардировать (радиус 2)"}</button>`;
     }
@@ -350,6 +365,16 @@ function renderPanel() {
   if (sp) sp.onclick = () => {
     const u = unitById(getState().sel);
     if (u && spreadFaith(u.id).ok) { save(); refresh(); }
+  };
+  const stl = document.getElementById("civ-spysteal");
+  if (stl) stl.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u) { spyStealTech(u.id); save(); refresh(); }
+  };
+  const sab = document.getElementById("civ-spysab");
+  if (sab) sab.onclick = () => {
+    const u = unitById(getState().sel);
+    if (u) { spySabotage(u.id); save(); refresh(); }
   };
   const bb = document.getElementById("civ-bomb");
   if (bb) bb.onclick = () => {

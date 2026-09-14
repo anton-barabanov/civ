@@ -35,6 +35,7 @@ const UNITS = {
   gp_artist: { name: "Художник", letter: "Х", icon: "🎨", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "artist" },
   gp_prophet: { name: "Пророк", letter: "П", icon: "🙏", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "prophet" },
   gp_general: { name: "Полководец", letter: "Пк", icon: "🎖️", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "general" },
+  spy: { name: "Шпион", letter: "Шп", icon: "🕵", atk: 0, def: 1, moves: 2, cost: 70, tech: "espionage", upgrade: null },
 };
 
 const DIFFICULTIES = [
@@ -118,6 +119,7 @@ const TECHS = {
   flight: { name: "Полёт", cost: 260, req: ["electricity"] },
   bureaucracy: { name: "Государственное управление", cost: 200, req: ["banking", "education"] },
   compass: { name: "Компас", cost: 150, req: ["astronomy"] },
+  espionage: { name: "Разведка", cost: 130, req: ["banking"] },
 };
 
 const RELIGIONS = {
@@ -651,6 +653,7 @@ function reachable(u) {
         if (foe !== null) {
           if (atWar(u.owner, foe)) res.set(k, 0);
           else if (u.type === "missionary" && !other && city && m >= cost) res.set(k, m - cost);
+          else if (u.type === "spy" && !other && city && m >= cost) res.set(k, m - cost);
           continue;
         }
         if (m < cost) continue;
@@ -667,7 +670,7 @@ function reachable(u) {
 function moveUnit(u, x, y) {
   if (u.work) { addLog("Рабочий занят"); return; }
   const oc = cityAt(x, y);
-  if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner) && u.type !== "missionary") return;
+  if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner) && u.type !== "missionary" && u.type !== "spy") return;
   const cargo = isNaval(u) ? unitsAt(u.x, u.y).filter((o) => !isNaval(o)) : [];
   u.x = x;
   u.y = y;
@@ -698,7 +701,7 @@ function captureCity(c, owner) {
 }
 
 function attack(att, x, y) {
-  if (UNITS[att.type].gp) return;
+  if (UNITS[att.type].gp || att.type === "spy") return;
   if (UNITS[att.type].air) return;
   const defs = unitsAt(x, y).filter((u) => u.owner !== att.owner);
   const city = cityAt(x, y);
@@ -1548,6 +1551,53 @@ function useGreatPerson(unitId) {
   return { ok: true };
 }
 
+function spyStealTech(unitId) {
+  const u = unitById(unitId);
+  if (!u) return { ok: false, reason: "юнит не найден" };
+  if (u.type !== "spy") return { ok: false, reason: "это не шпион" };
+  const c = cityAt(u.x, u.y);
+  if (!c || c.owner === u.owner) return { ok: false, reason: "шпион должен быть в чужом городе" };
+  const thief = S.players[u.owner];
+  const target = S.players[c.owner];
+  const pool = target.techs.filter((t) => !thief.techs.includes(t));
+  if (!pool.length) return { ok: false, reason: "нечего красть" };
+  const counter = S.units.some((o) => o.type === "spy" && o.owner === c.owner && o.x === c.x && o.y === c.y);
+  const chance = counter ? 0.3 : 0.6;
+  const wasPeace = !atWar(u.owner, c.owner);
+  S.units = S.units.filter((x) => x !== u);
+  if (S.sel === u.id) S.sel = null;
+  if (Math.random() < chance) {
+    const t = pool[(Math.random() * pool.length) | 0];
+    grantTech(thief, t);
+    addLog(`Шпион ${thief.name} выкрал технологию ${TECHS[t].name} из ${c.name}`);
+    return { ok: true, tech: t };
+  }
+  addLog(`Шпион ${thief.name} пойман в ${c.name}`);
+  if (wasPeace && Math.random() < 0.3) declareWar(c.owner, u.owner);
+  return { ok: false, reason: "шпион пойман" };
+}
+
+function spySabotage(unitId) {
+  const u = unitById(unitId);
+  if (!u) return { ok: false, reason: "юнит не найден" };
+  if (u.type !== "spy") return { ok: false, reason: "это не шпион" };
+  const c = cityAt(u.x, u.y);
+  if (!c || c.owner === u.owner) return { ok: false, reason: "шпион должен быть в чужом городе" };
+  const counter = S.units.some((o) => o.type === "spy" && o.owner === c.owner && o.x === c.x && o.y === c.y);
+  const chance = counter ? 0.35 : 0.7;
+  const wasPeace = !atWar(u.owner, c.owner);
+  S.units = S.units.filter((x) => x !== u);
+  if (S.sel === u.id) S.sel = null;
+  if (Math.random() < chance) {
+    c.prodStored = Math.floor(c.prodStored / 2);
+    addLog(`Саботаж в ${c.name}: производство наполовину утрачено`);
+    return { ok: true };
+  }
+  addLog(`Шпион ${S.players[u.owner].name} пойман в ${c.name}`);
+  if (wasPeace && Math.random() < 0.3) declareWar(c.owner, u.owner);
+  return { ok: false, reason: "шпион пойман" };
+}
+
 function aiTurn() {
   for (let i = 0; i < S.players.length; i++) if (!S.players[i].isHuman) aiTurnOne(i);
 }
@@ -1677,6 +1727,12 @@ function aiTurnOne(owner) {
       }
     }
   }
+  if (own.length && p.techs.includes("espionage") && !myUnits.some((u) => u.type === "spy") &&
+    p.gold >= 120 && Math.random() < 0.15 &&
+    S.cities.some((c) => c.owner !== owner && playerAlive(c.owner))) {
+    const spyHome = own.slice().sort((a, b) => b.pop - a.pop || a.id - b.id)[0];
+    buyForGold(spyHome.id, "unit", "spy");
+  }
   for (const u of [...S.units]) {
     if (u.owner !== owner || !S.units.includes(u)) continue;
     if (isAir(u)) {
@@ -1764,6 +1820,28 @@ function aiTurnOne(owner) {
           if (u.x + "," + u.y === before) break;
         }
         if (u.x === home.x && u.y === home.y) useGreatPerson(u.id);
+      }
+      continue;
+    }
+    if (u.type === "spy") {
+      let tgt = null;
+      let bestTechs = -1;
+      let bestD = Infinity;
+      for (const c of S.cities) {
+        if (c.owner === owner || !playerAlive(c.owner)) continue;
+        const n = S.players[c.owner].techs.length;
+        const d = dist(u.x, u.y, c.x, c.y);
+        if (n > bestTechs || (n === bestTechs && d < bestD)) { bestTechs = n; bestD = d; tgt = c; }
+      }
+      if (tgt) {
+        while (u.moves > 0 && (u.x !== tgt.x || u.y !== tgt.y)) {
+          const before = u.x + "," + u.y;
+          stepToward(u, tgt.x, tgt.y);
+          if (u.x + "," + u.y === before) break;
+        }
+        if (u.x === tgt.x && u.y === tgt.y) spyStealTech(u.id);
+      } else {
+        u.moves = 0;
       }
       continue;
     }
@@ -2076,7 +2154,7 @@ function stepToward(u, tx, ty) {
     if (!canEnter(u, nx, ny)) return false;
     if (unitsAt(nx, ny).some((o) => o.owner !== u.owner)) return false;
     const c = cityAt(nx, ny);
-    if (c && c.owner !== u.owner && !(u.type === "missionary" && !atWar(u.owner, c.owner))) return false;
+    if (c && c.owner !== u.owner && !((u.type === "missionary" || u.type === "spy") && !atWar(u.owner, c.owner))) return false;
     return true;
   });
   if (!opts.length) { u.moves = 0; return; }
@@ -2646,7 +2724,7 @@ export {
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal, isAir,
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, bombard, foundCity, drownCheck, nextInStack,
   cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, finishTurn, save, load, legendaryCities,
-  foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
+  foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson, spyStealTech, spySabotage,
   spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections, processGovernments, startRevolution,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
   offerDeal, dealValue, mapValue, demandTribute, processDeals, barbarianTurn, placeCamps, clearCamp,
@@ -2725,6 +2803,8 @@ export function debugApi() {
     techAvailable,
     grantFreeTech,
     useGreatPerson,
+    spyStealTech,
+    spySabotage,
     spreadFaith,
     declareStateReligion,
     startRevolution,
