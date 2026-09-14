@@ -7,6 +7,8 @@ export async function createRenderer3D(container, handlers) {
   const FX_CLASH = 0.3;
   const FX_KICK = 0.25;
   const FX_KICK_DIST = 0.06;
+  const FX_BUILD = 0.6;
+  const FX_PULSE = 0.6;
   const FX_MAX = 5;
   const effects = [];
   const dying = [];
@@ -558,7 +560,7 @@ export async function createRenderer3D(container, handlers) {
       if (!e) {
         const holder = new THREE.Group();
         overlayRoot.add(holder);
-        e = { holder, mesh: null, pop: -1, walls: null, owner: -1, religion: null, relMesh: null, wonder: null, wMesh: null, flag: null, flagPhase: c.id % 7, spawnT: 0 };
+        e = { holder, mesh: null, pop: -1, walls: null, owner: -1, religion: null, relMesh: null, wonder: null, wMesh: null, flag: null, flagPhase: c.id % 7, spawnT: 0, buildT: 1, pulseT: 1, buildings: -1, wonderCount: -1, prodRatio: null };
         cityHolders.set(c.id, e);
       }
       const walls = !!c.walls;
@@ -581,6 +583,18 @@ export async function createRenderer3D(container, handlers) {
         e.owner = c.owner;
         e.wonder = wonder;
       }
+      const bCount = typeof c.buildings === "number" ? c.buildings : 0;
+      const wCount = c.wonders ? c.wonders.length : 0;
+      if (e.buildings >= 0) {
+        if (bCount > e.buildings) e.pulseT = 0;
+        if (wCount > e.wonderCount) {
+          e.buildT = 0;
+          if (e.wMesh) e.wMesh.scale.setScalar(0.05);
+          spawnRing(tileX(c.x, vm), tileZ(c.y, vm), 0xffe14d, FX_RING);
+        }
+      }
+      e.buildings = bCount;
+      e.wonderCount = wCount;
       const rel = c.religion || null;
       if (e.religion !== rel) {
         if (e.relMesh) e.holder.remove(e.relMesh);
@@ -600,6 +614,7 @@ export async function createRenderer3D(container, handlers) {
         e.holder.add(e.barFill);
       }
       const ratio = typeof c.prodRatio === "number" ? c.prodRatio : null;
+      e.prodRatio = ratio;
       e.barBg.visible = ratio !== null;
       e.barFill.visible = ratio !== null;
       if (ratio !== null) e.barFill.scale.x = Math.max(0.02, ratio);
@@ -748,11 +763,26 @@ export async function createRenderer3D(container, handlers) {
       if (!e.air || e.animT < 0.3) continue;
       e.holder.position.y = e.baseY + 0.04 * Math.sin(t * 1.8 + id % 5);
     }
-    for (const e of cityHolders.values()) {
+    for (const [id, e] of cityHolders) {
+      let s = 1;
+      let anim = false;
       if (e.spawnT < 0.3) {
         e.spawnT += dt;
-        e.holder.scale.setScalar(e.spawnT < 0.3 ? 0.05 + 0.95 * (e.spawnT / 0.3) : 1);
+        s *= e.spawnT < 0.3 ? 0.05 + 0.95 * (e.spawnT / 0.3) : 1;
+        anim = true;
       }
+      if (e.pulseT < FX_PULSE) {
+        e.pulseT += dt;
+        s *= 1 + 0.12 * Math.sin(Math.PI * Math.min(e.pulseT / FX_PULSE, 1));
+        anim = true;
+      }
+      if (anim) e.holder.scale.setScalar(s);
+      if (e.buildT < FX_BUILD) {
+        e.buildT += dt;
+        const k = Math.min(e.buildT / FX_BUILD, 1);
+        if (e.wMesh) e.wMesh.scale.setScalar(0.05 + 0.95 * k * (2 - k));
+      }
+      if (e.prodRatio !== null) e.barFill.scale.x = Math.max(0.02, e.prodRatio) * (1 + 0.06 * Math.sin(t * 3 + id));
       if (e.flag) e.flag.rotation.y = 0.15 * Math.sin(t * 2 + e.flagPhase);
     }
     for (const e of unitHolders.values()) {

@@ -77,6 +77,7 @@ function buildViewModel() {
       return {
         id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner,
         walls: c.buildings.includes("walls"), religion: c.religion || null,
+        buildings: c.buildings.length,
         happy: c.happy ?? 1, unhappy: c.unhappy ?? 0, riot: !!c.riot,
         revolt: (c.revoltPressure || 0) >= 3,
         wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
