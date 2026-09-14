@@ -5,6 +5,7 @@ import {
   playerGoldPerTurn, buyForGold, upgradeCost, upgradeUnit,
   computeVision, getState, getVisible, nextInStack,
   relKey, atWar, declareWar, offerPeace, strengthOf, offerDeal, mapValue, demandTribute, resourceOwned,
+  proposeAlliance, breakAlliance,
   RELIGIONS, GOVERNMENTS, WONDERS, SS_PARTS, RESOURCES, isHolyCity, cityById,
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson, spyStealTech, spySabotage,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
@@ -817,9 +818,14 @@ function showDiplo() {
       <div class="civ-prod-list">
         ${S.players.map((p, i) => ({ p, i })).filter(({ i }) => i !== cur).map(({ p, i }) => {
           const rel = (S.relations || {})[relKey(cur, i)] || { war: false, since: -1 };
-          const status = rel.war ? `⚔ война с хода ${rel.since}` : "🕊 мир";
+          const status = rel.war ? `⚔ война с хода ${rel.since}` : rel.ally ? `🤝 союз с хода ${rel.allySince}` : "🕊 мир";
           const cd = 10 - (S.turn - (rel.lastTradeTurn ?? -99));
           const cooldown = !rel.war && cd > 0;
+          const allyPenalty = S.turn - (rel.allyBrokenTurn ?? -99) < 20;
+          const allyBtnOff = rel.war || rel.ally || allyPenalty;
+          const allyTitle = rel.war ? "Союз невозможен во время войны"
+            : rel.ally ? "Союз уже действует"
+            : `Недавний разрыв союза: недоверие ещё ${20 - (S.turn - (rel.allyBrokenTurn ?? -99))} ход.`;
           const open = !rel.war && dt.open === i;
           const mine = me.techs.filter((t) => !p.techs.includes(t));
           const theirs = p.techs.filter((t) => !me.techs.includes(t));
@@ -849,6 +855,8 @@ function showDiplo() {
             <span>
               <button class="btn text" data-war="${i}" ${rel.war ? "disabled" : ""}>Объявить войну</button>
               <button class="btn text" data-peace="${i}" ${rel.war ? "" : "disabled"}>Предложить мир</button>
+              <button class="btn text" data-ally="${i}" ${allyBtnOff ? `disabled title="${allyTitle}"` : ""}>Предложить союз</button>
+              <button class="btn text" data-breakally="${i}" ${rel.ally ? `title="Разрыв портит отношения на 20 ходов"` : "disabled"}>Разорвать союз</button>
               ${rel.war
                 ? `<button class="btn text" disabled>Торговля</button> <i>Только в мирное время</i>`
                 : `<button class="btn text" data-trade="${i}">${open ? "Скрыть сделки" : "Сделки"}</button>${cooldown ? ` <i>сделка доступна через ${cd} ход.</i>` : ""}`}
@@ -953,6 +961,22 @@ function showDiplo() {
   m.querySelectorAll("[data-peace]").forEach((b) => {
     b.onclick = () => {
       offerPeace(cur, Number(b.dataset.peace));
+      save();
+      showDiplo();
+      refresh();
+    };
+  });
+  m.querySelectorAll("[data-ally]").forEach((b) => {
+    b.onclick = () => {
+      proposeAlliance(cur, Number(b.dataset.ally));
+      save();
+      showDiplo();
+      refresh();
+    };
+  });
+  m.querySelectorAll("[data-breakally]").forEach((b) => {
+    b.onclick = () => {
+      breakAlliance(cur, Number(b.dataset.breakally));
       save();
       showDiplo();
       refresh();

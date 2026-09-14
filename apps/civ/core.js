@@ -47,6 +47,11 @@ const DIFFICULTIES = [
 const PEACE_WAR_LEN = 10;
 const PEACE_STRENGTH = 0.6;
 const TRADE_COOLDOWN = 10;
+const ALLY_PENALTY_TURNS = 20;
+const ALLY_PENALTY_MULT = 1.2;
+const ALLY_JOIN_STRENGTH = 0.9;
+const ALLY_PROPOSE_CHANCE = 0.15;
+const ALLY_PROPOSE_COOLDOWN = 5;
 const MIL_TECHS = ["iron", "horsebackriding", "machinery", "feudalism", "gunpowder"];
 
 const BARB_ID = 99;
@@ -541,7 +546,7 @@ function newGame(diff = 1, opponents = 1, humans = 1) {
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
-      S.relations[relKey(i, j)] = { war: false, since: -1, lastTradeTurn: -99 };
+      S.relations[relKey(i, j)] = { war: false, since: -1, lastTradeTurn: -99, ally: false, allySince: -1, allyBrokenTurn: -99, allyAskedTurn: -99 };
   const g = generateMap();
   S.map = g.map;
   S.res = g.res;
@@ -652,6 +657,11 @@ function reachable(u) {
         const foe = other ? other.owner : (city && city.owner !== u.owner ? city.owner : null);
         if (foe !== null) {
           if (atWar(u.owner, foe)) res.set(k, 0);
+          else if (isAlly(u.owner, foe) && m >= cost) {
+            seen.add(k);
+            res.set(k, m - cost);
+            buckets[m - cost].push([nx, ny]);
+          }
           else if (u.type === "missionary" && !other && city && m >= cost) res.set(k, m - cost);
           else if (u.type === "spy" && !other && city && m >= cost) res.set(k, m - cost);
           continue;
@@ -670,7 +680,7 @@ function reachable(u) {
 function moveUnit(u, x, y) {
   if (u.work) { addLog("Рабочий занят"); return; }
   const oc = cityAt(x, y);
-  if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner) && u.type !== "missionary" && u.type !== "spy") return;
+  if (oc && oc.owner !== u.owner && !atWar(u.owner, oc.owner) && !isAlly(u.owner, oc.owner) && u.type !== "missionary" && u.type !== "spy") return;
   const cargo = isNaval(u) ? unitsAt(u.x, u.y).filter((o) => !isNaval(o)) : [];
   u.x = x;
   u.y = y;
@@ -1100,8 +1110,10 @@ function startRevolution(pIdx, govId) {
 function relWarFactor(i, j) {
   const a = S.players[i] && S.players[i].stateReligion;
   const b = S.players[j] && S.players[j].stateReligion;
-  if (a && b) return a === b ? 0.5 : 1.3;
-  return 1;
+  let f = a && b ? (a === b ? 0.5 : 1.3) : 1;
+  const r = S.relations && S.relations[relKey(i, j)];
+  if (r && S.turn - (r.allyBrokenTurn ?? -99) < ALLY_PENALTY_TURNS) f *= ALLY_PENALTY_MULT;
+  return f;
 }
 
 function cityYields(c) {
@@ -2173,9 +2185,11 @@ function atWar(i, j) {
   return !!(r && r.war);
 }
 
-function declareWar(i, j) {
+function declareWar(i, j, _cascade) {
   const r = S.relations[relKey(i, j)];
   if (!r || r.war) return;
+  const wasAlly = isAlly(i, j);
+  if (wasAlly) breakAlliance(i, j);
   r.war = true;
   r.since = S.turn;
   addLog(`${S.players[i].name} объявляет войну ${S.players[j].name}`);
@@ -2195,6 +2209,11 @@ function declareWar(i, j) {
   if (S.pendingMapOffer && (S.pendingMapOffer.ai === i || S.pendingMapOffer.ai === j))
     S.pendingMapOffer = null;
   if (purged) addLog(`Сделки и дань аннулированы: война (${S.players[i].name} ↔ ${S.players[j].name})`);
+  if (!wasAlly && !_cascade)
+    for (let k = 0; k < S.players.length; k++) {
+      if (k === i || k === j || !playerAlive(k)) continue;
+      if (isAlly(k, j)) declareWar(k, i, true);
+    }
 }
 
 function makePeace(i, j) {
@@ -2225,6 +2244,46 @@ function offerPeace(humanIdx, aiIdx) {
   }
   addLog(`${S.players[aiIdx].name} отвергают предложение мира`);
   return false;
+}
+
+function isAlly(i, j) {
+  if (i === BARB_ID || j === BARB_ID || i === j) return false;
+  const r = S.relations && S.relations[relKey(i, j)];
+  return !!(r && r.ally);
+}
+
+function commonWarOf(i, j) {
+  for (let t = 0; t < S.players.length; t++)
+    if (t !== i && t !== j && atWar(i, t) && atWar(j, t)) return true;
+  return false;
+}
+
+function proposeAlliance(fromIdx, toIdx) {
+  const from = S.players[fromIdx], to = S.players[toIdx];
+  if (!from || !to || fromIdx === toIdx || fromIdx === BARB_ID || toIdx === BARB_ID)
+    return { ok: false, reason: "неизвестный партнёр" };
+  const r = S.relations[relKey(fromIdx, toIdx)];
+  if (!r || r.war) return { ok: false, reason: "союз возможен только в мирное время" };
+  if (r.ally) return { ok: false, reason: "союз уже действует" };
+  if (S.turn - (r.allyBrokenTurn ?? -99) < ALLY_PENALTY_TURNS) return { ok: false, reason: "недавний разрыв союза" };
+  if (!to.isHuman) {
+    if (relWarFactor(fromIdx, toIdx) >= 1.3) return { ok: false, reason: "разные государственные религии" };
+    if (strengthOf(fromIdx) >= ALLY_JOIN_STRENGTH * strengthOf(toIdx) && !commonWarOf(fromIdx, toIdx))
+      return { ok: false, reason: "нет общих интересов" };
+  }
+  r.ally = true;
+  r.allySince = S.turn;
+  addLog(`Военный союз: ${from.name} ↔ ${to.name}`);
+  return { ok: true };
+}
+
+function breakAlliance(i, j) {
+  const r = S.relations && S.relations[relKey(i, j)];
+  if (!r || !r.ally) return { ok: false, reason: "союз не действует" };
+  r.ally = false;
+  r.allyBrokenTurn = S.turn;
+  addLog(`Союз расторгнут: ${S.players[i].name} и ${S.players[j].name} — недоверие ${ALLY_PENALTY_TURNS} ходов`);
+  return { ok: true };
 }
 
 function mapValue(fromIdx, toIdx) {
@@ -2411,6 +2470,7 @@ function aiDiplomacy() {
     let bd = Infinity;
     for (let j = 0; j < S.players.length; j++) {
       if (j === i) continue;
+      if (isAlly(i, j)) continue;
       const theirs = pts(j);
       let dmin = Infinity;
       for (const [ax, ay] of mine)
@@ -2451,6 +2511,18 @@ function aiDiplomacy() {
           break;
         }
       }
+    }
+  for (let x = 0; x < ai.length; x++)
+    for (let y = x + 1; y < ai.length; y++) {
+      const a = ai[x], b = ai[y];
+      if (atWar(a, b) || !playerAlive(a) || !playerAlive(b)) continue;
+      const rel = S.relations[relKey(a, b)];
+      if (rel.ally || S.turn - (rel.allyAskedTurn ?? -99) < ALLY_PROPOSE_COOLDOWN) continue;
+      if (Math.random() >= ALLY_PROPOSE_CHANCE || !commonWarOf(a, b)) continue;
+      const weak = strengthOf(a) <= strengthOf(b) ? a : b;
+      const strong = weak === a ? b : a;
+      proposeAlliance(weak, strong);
+      rel.allyAskedTurn = S.turn;
     }
   if (!S.pendingTribute && liveHumans.length && Math.random() < 0.3) {
     const h = liveHumans[(Math.random() * liveHumans.length) | 0];
@@ -2651,10 +2723,15 @@ function load() {
       S.relations = {};
       for (let i = 0; i < S.players.length; i++)
         for (let j = i + 1; j < S.players.length; j++)
-          S.relations[relKey(i, j)] = { war: false, since: -1, lastTradeTurn: -99 };
+          S.relations[relKey(i, j)] = { war: false, since: -1, lastTradeTurn: -99, ally: false, allySince: -1, allyBrokenTurn: -99, allyAskedTurn: -99 };
     }
-    for (const k of Object.keys(S.relations))
+    for (const k of Object.keys(S.relations)) {
       if (typeof S.relations[k].lastTradeTurn !== "number") S.relations[k].lastTradeTurn = -99;
+      if (typeof S.relations[k].ally !== "boolean") S.relations[k].ally = false;
+      if (typeof S.relations[k].allySince !== "number") S.relations[k].allySince = -1;
+      if (typeof S.relations[k].allyBrokenTurn !== "number") S.relations[k].allyBrokenTurn = -99;
+      if (typeof S.relations[k].allyAskedTurn !== "number") S.relations[k].allyAskedTurn = -99;
+    }
     for (const c of S.cities) if (typeof c.culture !== "number") c.culture = 0;
     if (!Array.isArray(S.religions)) S.religions = [];
     if (!Array.isArray(S.wonders)) S.wonders = [];
@@ -2727,6 +2804,7 @@ export {
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson, spyStealTech, spySabotage,
   spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections, processGovernments, startRevolution,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
+  isAlly, proposeAlliance, breakAlliance,
   offerDeal, dealValue, mapValue, demandTribute, processDeals, barbarianTurn, placeCamps, clearCamp,
   unitAvailable, resourceConnected, resourceOwned, hasMarble, wonderCost, startImprovement, cancelWork,
 };
@@ -2767,6 +2845,9 @@ export function debugApi() {
     declareWar,
     makePeace,
     offerPeace,
+    isAlly,
+    proposeAlliance,
+    breakAlliance,
     strengthOf,
     offerTechTrade,
     valueOfDeal,
