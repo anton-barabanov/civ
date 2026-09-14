@@ -960,6 +960,39 @@ function landTradeActive(c) {
   return false;
 }
 
+function roadNetworkComponents() {
+  const comp = new Map();
+  let next = 0;
+  for (let i = 0; i < W * H; i++) {
+    if (comp.has(i) || !roadDoneAt(i) || !TERRAIN[S.map[i]].passable) continue;
+    next++;
+    comp.set(i, next);
+    const q = [i];
+    while (q.length) {
+      const k = q.pop();
+      for (const [nx, ny] of neighbors(k % W, (k / W) | 0)) {
+        const nk = key(nx, ny);
+        if (comp.has(nk) || !roadDoneAt(nk) || !TERRAIN[S.map[nk]].passable) continue;
+        comp.set(nk, next);
+        q.push(nk);
+      }
+    }
+  }
+  return comp;
+}
+
+function roadConnected(c1, c2, comp) {
+  if (!c1 || !c2 || c1.id === c2.id) return false;
+  const comps = comp || roadNetworkComponents();
+  const ids = new Set();
+  for (const [nx, ny] of neighbors(c1.x, c1.y)) {
+    const id = comps.get(key(nx, ny));
+    if (id) ids.add(id);
+  }
+  if (!ids.size) return false;
+  return neighbors(c2.x, c2.y).some(([nx, ny]) => ids.has(comps.get(key(nx, ny))));
+}
+
 function buildingEffects(c) {
   const e = { foodFlat: 0, prodFlat: 0, sciFlat: 0, sciMult: 1, defMult: 1, tradeMult: 1, culture: 0, unitAtk: 0, maxPop: 0, happiness: 0 };
   for (const b of c.buildings) {
@@ -1039,6 +1072,7 @@ function checkFoundReligions() {
 }
 
 function spreadReligions() {
+  const roadComps = roadNetworkComponents();
   for (const c of S.cities) {
     if (c.religion || isHolyCity(c)) continue;
     const near = S.cities.filter((o) => o.religion && o.id !== c.id && dist(c.x, c.y, o.x, o.y) <= REL_SPREAD_RADIUS);
@@ -1050,15 +1084,18 @@ function spreadReligions() {
         if (!o.religion || o.id === c.id || near.includes(o) || !isCoastal(o.x, o.y)) continue;
         if (waterAdjKeys(o.x, o.y).some((k) => comps.has(S.waterComp[k]))) sea.push(o);
       }
-      if (sea.length) pressure += 1;
     }
+    const road = S.cities.filter((o) => o.religion && o.id !== c.id && !near.includes(o) && !sea.includes(o) && roadConnected(c, o, roadComps));
+    if (sea.length || road.length) pressure += 1;
     if (!pressure) continue;
     c.relPressure = (c.relPressure || 0) + pressure;
     if (c.relPressure >= REL_SPREAD_THRESHOLD) {
-      const src = [...near, ...sea].sort((a, b) =>
+      const src = [...near, ...sea, ...road].sort((a, b) =>
         dist(c.x, c.y, a.x, a.y) - dist(c.x, c.y, b.x, b.y) || a.id - b.id)[0];
       c.religion = src.religion;
       c.relPressure = 0;
+      if (!near.includes(src))
+        addLog(`Религия ${RELIGIONS[src.religion].name} пришла в город ${c.name} по торговому пути (${road.includes(src) ? "дорога" : "море"})`);
     }
   }
 }
@@ -2903,6 +2940,8 @@ export function debugApi() {
     tradeActive,
     landTradeActive,
     roadDoneAt,
+    roadNetworkComponents,
+    roadConnected,
     recomputeBorders,
     cityRadius,
     unitAvailable,
