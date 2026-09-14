@@ -33,7 +33,7 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
 const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
@@ -51,6 +51,9 @@ const MUT_TARGETS = {
   m: ['else if (gov.government === "democracy") e.sciMult *= 1.25;', 'else if (gov.government === "democracy") e.sciMult *= 1;'],
   n: ["const BARB_SPAWN_EVERY = [12, 8, 6];", "const BARB_SPAWN_EVERY = [99, 99, 99];"],
   o: ["const chance = counter ? 0.3 : 0.6;", "const chance = counter ? 0.3 : 0.0;"],
+  p: ["if (isAlly(k, j)) declareWar(k, i, true);", "if (isAlly(k, j)) declareWar(k, i);"],
+  q: ["  const comps = comp || roadNetworkComponents();", "  return false;\n  const comps = comp || roadNetworkComponents();"],
+  r: ["const CULTURE_WIN_THRESHOLD = 400;", "const CULTURE_WIN_THRESHOLD = 9;"],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -3040,6 +3043,239 @@ check("migrated S7 save lives one turn", s7Err === null && api.S.turn === 2);
   check("36x24 findStarts ladder reaches distance 7", saw7);
 }
 
+check("map dimensions 36x24 from debugApi", TW === 36 && TH === 24);
+api.newGame(1);
+check("map array sized W times H", api.S.map.length === TW * TH);
+{
+  const conts = allComps(api.S.map, (t) => t !== 0).sort((a, b) => b.cells.length - a.cells.length);
+  check("two continents sized 80 and 45", conts.length >= 2 &&
+    conts[0].cells.length >= 80 && conts[1].cells.length >= 45);
+}
+api.newGame(1, 4);
+check("five players start with settler and warrior", api.S.players.length === 5 &&
+  api.S.units.length === 10 &&
+  [0, 1, 2, 3, 4].every((i) => api.S.units.some((u) => u.owner === i && u.type === "settler") &&
+    api.S.units.filter((u) => u.owner === i).length === 2));
+{
+  const campWant = [5, 7, 8];
+  let campsExact = true;
+  for (let d = 0; d < 3; d++) {
+    api.newGame(d);
+    if (api.S.camps.length !== campWant[d]) campsExact = false;
+  }
+  check("barb camp count exact per difficulty", campsExact);
+}
+
+api.newGame(1);
+store["civ1_save"] = JSON.stringify({ turn: 999, map: [] });
+api.save();
+check("save written under civ2_save key", !!store["civ2_save"] && JSON.parse(store["civ2_save"]).turn === api.S.turn);
+check("old civ1_save key ignored on load", api.load() === true && api.S.turn !== 999);
+delete store["civ1_save"];
+
+api.newGame(1);
+check("alliance: proposal to self refused", api.proposeAlliance(0, 0).ok === false);
+check("alliance: breakAlliance refused without pact", api.breakAlliance(0, 1).ok === false);
+check("alliance: AI proposes to human without gates", api.proposeAlliance(1, 0).ok === true && api.isAlly(0, 1) === true);
+check("alliance: isAlly symmetric, false for self and barbs",
+  api.isAlly(1, 0) === true && api.isAlly(0, 0) === false && api.isAlly(0, api.BARB_ID) === false);
+check("alliance: repeat proposal refused", api.proposeAlliance(0, 1).ok === false &&
+  api.proposeAlliance(0, 1).reason.includes("уже действует"));
+check("alliance: manual breakAlliance marks breach turn", api.breakAlliance(0, 1).ok === true &&
+  api.isAlly(0, 1) === false && api.S.relations["0:1"].allyBrokenTurn === api.S.turn);
+check("alliance: relWarFactor penalty 1.2 after breach", api.relWarFactor(0, 1) === 1.2);
+check("alliance: proposal blocked by recent breach", api.proposeAlliance(0, 1).ok === false &&
+  api.proposeAlliance(0, 1).reason.includes("недавний разрыв"));
+api.S.turn += 19;
+check("alliance: penalty holds within 20 turns", api.relWarFactor(0, 1) === 1.2);
+api.S.turn += 1;
+check("alliance: penalty expires after 20 turns", api.relWarFactor(0, 1) === 1);
+
+api.newGame(1);
+const allySpot1 = api.S.units.find((u) => u.owner === 1);
+for (let i = 0; i < 3; i++) api.spawn("catapult", 1, allySpot1.x, allySpot1.y);
+check("alliance: weak side accepted when strength below 0.9", api.proposeAlliance(0, 1).ok === true && api.isAlly(0, 1));
+check("alliance: pact logged", api.S.log.some((l) => l.includes("Военный союз")));
+
+api.newGame(1);
+const allySpot0 = api.S.units.find((u) => u.owner === 0);
+const allySpot1b = api.S.units.find((u) => u.owner === 1);
+for (let i = 0; i < 3; i++) api.spawn("catapult", 0, allySpot0.x, allySpot0.y);
+for (let i = 0; i < 3; i++) api.spawn("catapult", 1, allySpot1b.x, allySpot1b.y);
+check("alliance: strong side refused without common war", api.proposeAlliance(0, 1).ok === false &&
+  api.proposeAlliance(0, 1).reason.includes("нет общих интересов"));
+
+api.newGame(1);
+const allySpot1c = api.S.units.find((u) => u.owner === 1);
+for (let i = 0; i < 3; i++) api.spawn("catapult", 1, allySpot1c.x, allySpot1c.y);
+api.S.players[0].stateReligion = "oracle";
+api.S.players[1].stateReligion = "muses";
+check("alliance: different state religions refused", api.proposeAlliance(0, 1).ok === false &&
+  api.proposeAlliance(0, 1).reason.includes("разные государственные религии"));
+
+api.newGame(1);
+api.declareWar(0, 1);
+check("alliance: proposal refused at war", api.proposeAlliance(0, 1).ok === false &&
+  api.proposeAlliance(0, 1).reason.includes("мирное время"));
+
+api.newGame(1, 4);
+const setAlly = (a, b) => { const r = api.S.relations[api.relKey(a, b)]; r.ally = true; r.allySince = api.S.turn; };
+setAlly(0, 3);
+setAlly(1, 2);
+setAlly(2, 4);
+api.declareWar(0, 1);
+check("alliance war cascade: ally of target joins", api.atWar(2, 0) === true && api.atWar(0, 2) === true);
+check("alliance war cascade stops at depth 1",
+  !api.atWar(3, 2) && !api.atWar(3, 1) && !api.atWar(4, 3) && !api.atWar(4, 0) && !api.atWar(4, 1) && !api.atWar(1, 3));
+check("alliance war cascade keeps pacts and peace between allies",
+  api.isAlly(0, 3) && api.isAlly(1, 2) && api.isAlly(2, 4) && !api.atWar(1, 2));
+
+api.newGame(1, 3);
+setAlly(0, 1);
+setAlly(2, 3);
+api.declareWar(0, 1);
+check("war on ally breaks the pact", api.atWar(0, 1) && !api.isAlly(0, 1) &&
+  api.S.relations["0:1"].allyBrokenTurn === api.S.turn);
+check("war on ally triggers no cascade",
+  !api.atWar(2, 0) && !api.atWar(2, 1) && !api.atWar(3, 0) && !api.atWar(3, 1) && api.isAlly(2, 3));
+check("alliance breach penalty applies to relWarFactor", api.relWarFactor(0, 1) === 1.2);
+api.makePeace(0, 1);
+check("alliance blocked for 20 turns after breach", api.proposeAlliance(0, 1).ok === false &&
+  api.proposeAlliance(0, 1).reason.includes("недавний разрыв"));
+api.S.turn += 19;
+check("breach penalty holds at 19 turns", api.relWarFactor(0, 1) === 1.2);
+api.S.turn += 1;
+check("breach penalty gone at 20 turns", api.relWarFactor(0, 1) === 1);
+
+api.newGame(1);
+api.S.units = [];
+api.S.relations["0:1"].ally = true;
+api.S.map[4 * TW + 4] = 1;
+api.S.map[4 * TW + 5] = 1;
+api.S.res[4 * TW + 4] = null;
+api.S.res[4 * TW + 5] = null;
+api.foundCity(api.spawn("settler", 1, 4, 4));
+const allyUnit = api.spawn("warrior", 0, 5, 4);
+allyUnit.moves = 1;
+check("allied territory passable for units", api.reachable(allyUnit).has(4 * TW + 4) === true);
+api.moveUnit(allyUnit, 4, 4);
+check("allied city cannot be captured by entering", allyUnit.x === 4 && allyUnit.y === 4 &&
+  api.S.cities[0].owner === 1 && api.S.cities[0].pop === 1);
+
+api.newGame(1, 2);
+api.declareWar(0, 1);
+api.declareWar(0, 2);
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = s7Random; }
+check("AI proposes alliance on common war", api.isAlly(1, 2) === true &&
+  api.S.relations["1:2"].allyAskedTurn === api.S.turn);
+
+api.newGame(1, 2);
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = s7Random; }
+check("no AI alliance without common war", !api.isAlly(1, 2));
+
+api.newGame(1, 2);
+api.declareWar(0, 1);
+api.declareWar(0, 2);
+api.S.relations["1:2"].allyAskedTurn = api.S.turn;
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = s7Random; }
+check("AI alliance proposal respects cooldown", !api.isAlly(1, 2));
+
+api.newGame(1, 3);
+const aggroSpot3 = api.S.units.find((u) => u.owner === 3);
+for (let i = 0; i < 5; i++) api.spawn("catapult", 3, aggroSpot3.x, aggroSpot3.y);
+api.S.relations["0:3"].ally = true;
+api.S.turn = 99;
+Math.random = () => 0;
+try { api.aiDiplomacy(); } finally { Math.random = s7Random; }
+check("AI aggression skips ally", !api.atWar(3, 0) && api.isAlly(0, 3));
+check("AI aggression picks non-ally victim", [1, 2].filter((j) => api.atWar(3, j)).length === 1);
+
+api.newGame(1);
+api.S.units = [];
+const rdY = 4;
+for (let x = 3; x <= 7; x++) {
+  api.S.map[rdY * TW + x] = 1;
+  api.S.res[rdY * TW + x] = null;
+}
+api.foundCity(api.spawn("settler", 0, 3, rdY));
+api.foundCity(api.spawn("settler", 0, 7, rdY));
+const rdA = api.S.cities[0], rdB = api.S.cities[1];
+rdA.religion = "oracle";
+for (const c of api.S.cities) { c.pop = 1; c.buildings = []; c.producing = null; c.foodStored = 0; c.prodStored = 0; }
+check("roadConnected false without roads", api.roadConnected(rdA, rdB) === false);
+check("roadConnected false for same city", api.roadConnected(rdA, rdA) === false);
+api.S.impr[rdY * TW + 4] = { kind: "road" };
+api.S.impr[rdY * TW + 6] = { kind: "road" };
+check("roadConnected needs unbroken chain", api.roadConnected(rdA, rdB) === false);
+api.S.impr[rdY * TW + 5] = { kind: "road" };
+check("roadConnected via road chain", api.roadConnected(rdA, rdB) === true);
+const rdComp = api.roadNetworkComponents();
+check("road chain forms single component", !!rdComp.get(rdY * TW + 4) &&
+  rdComp.get(rdY * TW + 4) === rdComp.get(rdY * TW + 6) && !rdComp.has(rdY * TW + 8));
+rdB.relPressure = 0;
+api.processEconomy();
+check("religion road link adds +1 pressure", rdB.relPressure === 1 && rdB.religion === null);
+api.S.impr[rdY * TW + 5] = null;
+check("broken road disconnects cities", api.roadConnected(rdA, rdB) === false);
+api.processEconomy();
+check("pressure stops after road break", rdB.relPressure === 1);
+api.S.impr[rdY * TW + 5] = { kind: "road" };
+for (let i = 0; i < 4 && rdB.religion === null; i++) api.processEconomy();
+check("religion spreads along road network", rdB.religion === "oracle" && rdB.relPressure === 0);
+check("road spread logged", api.S.log.some((l) => l.includes("по торговому пути") && l.includes("дорога")));
+
+api.newGame(1);
+api.S.units = [];
+api.S.players[0].techs.push("sailing");
+const nsY = 6;
+for (let x = 3; x <= 11; x++) {
+  api.S.map[nsY * TW + x] = 1;
+  api.S.res[nsY * TW + x] = null;
+}
+for (let x = 3; x <= 7; x++) api.S.map[(nsY - 1) * TW + x] = 0;
+for (let x = 8; x <= 11; x++) api.S.map[(nsY - 1) * TW + x] = 1;
+api.foundCity(api.spawn("settler", 0, 3, nsY));
+api.foundCity(api.spawn("settler", 0, 7, nsY));
+api.foundCity(api.spawn("settler", 0, 11, nsY));
+const nsA = api.S.cities[0], nsB = api.S.cities[1], nsC = api.S.cities[2];
+nsA.religion = "oracle";
+nsC.religion = "muses";
+for (const c of api.S.cities) { c.pop = 1; c.buildings = []; c.producing = null; c.foodStored = 0; c.prodStored = 0; }
+for (const x of [8, 9, 10]) api.S.impr[nsY * TW + x] = { kind: "road" };
+nsB.relPressure = 0;
+api.processEconomy();
+check("road and sea links add pressure once", nsB.relPressure === 1);
+api.S.impr[nsY * TW + 9] = null;
+api.processEconomy();
+check("sea-only link keeps +1 pressure", nsB.relPressure === 2);
+for (let i = 0; i < 4 && nsB.religion === null; i++) api.processEconomy();
+check("religion arrives via sea trade route", nsB.religion === "oracle");
+
+api.newGame(1, 2);
+api.save();
+const rawAlly = JSON.parse(store["civ2_save"]);
+for (const k of Object.keys(rawAlly.relations))
+  for (const f of ["ally", "allySince", "allyBrokenTurn", "allyAskedTurn"]) delete rawAlly.relations[k][f];
+store["civ2_save"] = JSON.stringify(rawAlly);
+check("old relations migrate ally fields", api.load() === true &&
+  Object.keys(api.S.relations).length === 3 &&
+  Object.values(api.S.relations).every((r) => r.ally === false && r.allySince === -1 &&
+    r.allyBrokenTurn === -99 && r.allyAskedTurn === -99));
+api.S.relations["0:1"].ally = true;
+api.S.relations["0:1"].allySince = 7;
+api.S.relations["0:1"].allyBrokenTurn = 3;
+api.S.relations["0:1"].allyAskedTurn = 5;
+api.save();
+check("ally fields survive save-load roundtrip", api.load() === true && api.isAlly(0, 1) === true &&
+  api.S.relations["0:1"].allySince === 7 && api.S.relations["0:1"].allyBrokenTurn === 3 &&
+  api.S.relations["0:1"].allyAskedTurn === 5);
+const migSpot2 = api.S.units.find((u) => u.owner === 2);
+for (let i = 0; i < 3; i++) api.spawn("catapult", 2, migSpot2.x, migSpot2.y);
+check("proposeAlliance works after ally migration", api.proposeAlliance(1, 2).ok === true && api.isAlly(1, 2));
+
 if (!mutation) {
   const expectFail = {    a: "FAIL granary +2 food",
     b: "FAIL processEconomy updates borders after growth",
@@ -3056,8 +3292,11 @@ if (!mutation) {
     m: "FAIL democracy boosts science",
     n: "FAIL barbarian spawn honors difficulty timer",
     o: "FAIL spy steals tech on success roll",
+    p: "FAIL alliance war cascade stops at depth 1",
+    q: "FAIL roadConnected via road chain",
+    r: "FAIL culture win constants exposed",
   };
-  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"]) {
+  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r"]) {
     let r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     if (r.status === null || r.error) {
       r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
