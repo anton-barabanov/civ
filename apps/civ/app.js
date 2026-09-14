@@ -28,7 +28,7 @@ async function swapRenderer() {
   let next = null;
   try {
     const mod = await import("./renderer3d.js");
-    next = await mod.createRenderer3D(mapEl, { onTileClick, onTileRightClick });
+    next = await mod.createRenderer3D(mapEl, { onTileClick, onTileRightClick, onTileHover });
   } catch (e) {
     console.log("3D недоступно, включён резервный 2D", e);
   }
@@ -36,7 +36,7 @@ async function swapRenderer() {
     if (next) next.destroy();
     return;
   }
-  if (!next) next = createRenderer2D(mapEl, { onTileClick, onTileRightClick });
+  if (!next) next = createRenderer2D(mapEl, { onTileClick, onTileRightClick, onTileHover });
   renderer = next;
   refresh();
 }
@@ -352,6 +352,45 @@ function refresh() {
     const d = Math.round(renderer.getPhi() * 180 / Math.PI);
     if (Number(te.value) !== d) te.value = d;
   }
+}
+
+let lastTipKey = "";
+
+function onTileHover(x, y) {
+  const tip = document.getElementById("civ-tiletip");
+  if (!tip) return;
+  const S = getState();
+  if (!inMap(x, y) || !S.players[0].explored[key(x, y)]) {
+    tip.classList.remove("show");
+    lastTipKey = "";
+    return;
+  }
+  const k = key(x, y);
+  const vis = getVisible();
+  const units = unitsAt(x, y).filter((u) => u.owner === 0 || vis[k]);
+  const tk = `${x}:${y}:${S.turn}:${units.map((u) => u.id + ":" + u.moves).join(",")}`;
+  if (tk === lastTipKey) return;
+  lastTipKey = tk;
+  const t = TERRAIN[S.map[k]];
+  const owner = S.tileOwner[k];
+  const res = S.res ? S.res[k] : null;
+  const impr = S.impr ? S.impr[k] : null;
+  const city = cityAt(x, y);
+  let html = `<b>${t.name}</b>${t.def ? ` · защита +${t.def}%` : ""}`;
+  if (owner >= 0) html += `<div><i class="civ-dot" style="background:${S.players[owner].color}"></i> ${escapeHtml(S.players[owner].name)}</div>`;
+  if (res) html += `<div>${RESOURCES[res].icon} ${RESOURCES[res].name}</div>`;
+  if (impr) html += `<div>${impr.kind === "farm" ? "🌾" : impr.kind === "mine" ? "◆" : "🛤"} ${impr.left ? `строится: ${impr.left}` : ""}</div>`;
+  if (city) {
+    const h = cityHappiness(city);
+    html += `<div><b>🏛 ${escapeHtml(city.name)}</b> · нас. ${city.pop} ${city.walls ? "🛡" : ""}</div>`;
+    html += `<div>${h.happy >= h.unhappy ? "😊" : "😡"} ${h.unhappy}/${h.happy}${city.religion ? ` · ${RELIGIONS[city.religion].icon}` : ""}</div>`;
+  }
+  for (const u of units.slice(0, 3)) {
+    html += `<div><i class="civ-dot" style="background:${S.players[u.owner].color}"></i> ${UNITS[u.type].icon} ${UNITS[u.type].name} · ${u.moves}</div>`;
+  }
+  if (units.length > 3) html += `<div>+${units.length - 3} ещё</div>`;
+  tip.innerHTML = html;
+  tip.classList.add("show");
 }
 
 function showWorldMap() {
@@ -1114,7 +1153,7 @@ export const civApp = {
     const hadSave = load();
     root.innerHTML = `
       <div class="topbar" id="civ-top"></div>
-      <div class="civ-map-wrap">
+      <div class="civ-map-wrap" id="civ-map-wrap">
         <div id="civ-map"></div>
         <div class="civ-zoom">
           <button id="civ-zoom-in" title="Приблизить">+</button>
@@ -1124,6 +1163,7 @@ export const civApp = {
           <span>Наклон</span>
           <input type="range" id="civ-tilt" min="9" max="77" step="1" value="9">
         </div>
+        <div class="civ-tiletip" id="civ-tiletip"></div>
       </div>
       <div id="civ-panel" class="civ-panel"></div>
     `;
@@ -1135,6 +1175,20 @@ export const civApp = {
     document.getElementById("civ-tilt").oninput = (e) => {
       if (renderer && renderer.setPhi) renderer.setPhi(Number(e.target.value) * Math.PI / 180);
     };
+    const tipEl = document.getElementById("civ-tiletip");
+    const wrapEl = document.getElementById("civ-map-wrap");
+    wrapEl.addEventListener("pointermove", (e) => {
+      if (!tipEl.classList.contains("show")) return;
+      const r = wrapEl.getBoundingClientRect();
+      const lx = e.clientX - r.left + 14;
+      const ly = e.clientY - r.top + 14;
+      tipEl.style.left = Math.min(lx, r.width - 230) + "px";
+      tipEl.style.top = Math.min(ly, r.height - 120) + "px";
+    });
+    wrapEl.addEventListener("pointerleave", () => {
+      tipEl.classList.remove("show");
+      lastTipKey = "";
+    });
     if (!hadSave) newGame();
     computeVision();
     refresh();

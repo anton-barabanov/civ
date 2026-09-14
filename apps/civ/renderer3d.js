@@ -111,6 +111,8 @@ export async function createRenderer3D(container, handlers) {
 
   const pointer = { down: false, id: -1, button: 0, shift: false, ctrl: false, sx: 0, sy: 0, moved: 0 };
   let spaceHeld = false;
+  let hoverT = 0;
+  let lpTimer = null;
 
   const onKeyDown = (e) => {
     if (e.code === "Space") {
@@ -132,11 +134,24 @@ export async function createRenderer3D(container, handlers) {
     pointer.sx = e.clientX;
     pointer.sy = e.clientY;
     pointer.moved = 0;
+    if (e.pointerType === "touch" && handlers.onTileHover) {
+      lpTimer = setTimeout(() => {
+        if (pointer.down && pointer.moved < 5) pick(e, handlers.onTileHover);
+      }, 450);
+    }
     try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
   };
 
   const onPointerMove = (e) => {
-    if (!pointer.down || e.pointerId !== pointer.id) return;
+    if (!pointer.down || e.pointerId !== pointer.id) {
+      const now = performance.now();
+      if (now - hoverT >= 100) {
+        hoverT = now;
+        if (handlers.onTileHover && e.pointerType !== "touch") pick(e, handlers.onTileHover);
+      }
+      return;
+    }
+    if (lpTimer && pointer.moved >= 5) { clearTimeout(lpTimer); lpTimer = null; }
     const dx = e.clientX - pointer.sx;
     const dy = e.clientY - pointer.sy;
     pointer.sx = e.clientX;
@@ -147,6 +162,7 @@ export async function createRenderer3D(container, handlers) {
   };
 
   const onPointerUp = (e) => {
+    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
     if (!pointer.down || e.pointerId !== pointer.id) return;
     pointer.down = false;
     try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
