@@ -562,6 +562,26 @@ export function createImprovementMesh(kind, done = true) {
   return group;
 }
 
+export function createCampMesh() {
+  const group = new THREE.Group();
+  const hideM = mat("#7a5c3a");
+  const tent1 = add(group, geo("camp:tentBig", () => new THREE.ConeGeometry(0.16, 0.24, 4)), hideM, -0.09, 0.12, 0.05);
+  tent1.rotation.y = Math.PI / 4;
+  const tent2 = add(group, geo("camp:tentSmall", () => new THREE.ConeGeometry(0.11, 0.17, 4)), mat(C.woodDark), 0.1, 0.085, -0.14);
+  tent2.rotation.y = Math.PI / 4;
+  add(group, geo("camp:pole", () => new THREE.CylinderGeometry(0.012, 0.012, 0.3, 5)), mat(C.woodDark), -0.09, 0.27, 0.05);
+  add(group, geo("camp:flag", () => new THREE.BoxGeometry(0.09, 0.055, 0.012)), mat(C.coal), -0.045, 0.39, 0.05);
+  add(group, geo("camp:ash", () => new THREE.CylinderGeometry(0.09, 0.11, 0.03, 8)), mat(C.coal), 0.06, 0.015, 0.1);
+  add(group, geo("camp:flame", () => new THREE.ConeGeometry(0.035, 0.1, 5)), mat(C.roof), 0.06, 0.08, 0.1);
+  const stoneM = mat(C.stoneDark);
+  const stoneGeo = geo("camp:stone", () => new THREE.BoxGeometry(0.055, 0.045, 0.05));
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.2;
+    add(group, stoneGeo, stoneM, Math.cos(a) * 0.27, 0.022, Math.sin(a) * 0.27);
+  }
+  return group;
+}
+
 export function disposeModels3D() {
   for (const g of geoCache.values()) g.dispose();
   for (const m of matCache.values()) m.dispose();

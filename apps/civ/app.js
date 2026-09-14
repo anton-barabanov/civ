@@ -9,6 +9,7 @@ import {
   CULTURE_WIN_CITIES, legendaryCities, GREAT_PEOPLE, useGreatPerson,
   unitAvailable, resourceConnected, hasMarble, wonderCost, cityHappiness,
   startImprovement, cancelWork, spreadFaith, declareStateReligion, startRevolution, councilSupport,
+  BARB_ID, BARB_NAME, BARB_COLOR,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
 
@@ -76,14 +77,19 @@ function buildViewModel() {
   const units = S.units
     .filter((u) => (u.owner === cur || visible[key(u.x, u.y)]) && explored[key(u.x, u.y)])
     .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === cur && u.moves > 0, icon: UNITS[u.type].icon, air: !!UNITS[u.type].air }));
+  const players = S.players.map((p) => ({ color: p.color }));
+  players[BARB_ID] = { color: BARB_COLOR, name: BARB_NAME };
   return {
     W,
     H,
     currentPlayer: cur,
-    players: S.players.map((p) => ({ color: p.color })),
+    players,
     tiles,
     cities,
     units,
+    camps: (Array.isArray(S.camps) ? S.camps : [])
+      .filter((cp) => explored[key(cp.x, cp.y)])
+      .map((cp) => ({ x: cp.x, y: cp.y })),
     selected: sel ? { x: sel.x, y: sel.y } : null,
     reach,
   };
@@ -393,13 +399,15 @@ function onTileHover(x, y) {
   if (owner >= 0) html += `<div><i class="civ-dot" style="background:${S.players[owner].color}"></i> ${escapeHtml(S.players[owner].name)}</div>`;
   if (res) html += `<div>${RESOURCES[res].icon} ${RESOURCES[res].name}</div>`;
   if (impr) html += `<div>${impr.kind === "farm" ? "🌾" : impr.kind === "mine" ? "◆" : "🛤"} ${impr.left ? `строится: ${impr.left}` : ""}</div>`;
+  if ((Array.isArray(S.camps) ? S.camps : []).some((cp) => cp.x === x && cp.y === y)) html += `<div>⛺ Лагерь варваров</div>`;
   if (city) {
     const h = cityHappiness(city);
     html += `<div><b>🏛 ${escapeHtml(city.name)}</b> · нас. ${city.pop} ${city.walls ? "🛡" : ""}</div>`;
     html += `<div>${h.happy >= h.unhappy ? "😊" : "😡"} ${h.unhappy}/${h.happy}${city.religion ? ` · ${RELIGIONS[city.religion].icon}` : ""}</div>`;
   }
   for (const u of units.slice(0, 3)) {
-    html += `<div><i class="civ-dot" style="background:${S.players[u.owner].color}"></i> ${UNITS[u.type].icon} ${UNITS[u.type].name} · ${u.moves}</div>`;
+    const pl = u.owner === BARB_ID ? { color: BARB_COLOR } : S.players[u.owner];
+    html += `<div><i class="civ-dot" style="background:${pl.color}"></i> ${UNITS[u.type].icon} ${UNITS[u.type].name} · ${u.moves}</div>`;
   }
   if (units.length > 3) html += `<div>+${units.length - 3} ещё</div>`;
   tip.innerHTML = html;

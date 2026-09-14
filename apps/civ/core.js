@@ -48,6 +48,12 @@ const PEACE_STRENGTH = 0.6;
 const TRADE_COOLDOWN = 10;
 const MIL_TECHS = ["iron", "horsebackriding", "machinery", "feudalism", "gunpowder"];
 
+const BARB_ID = 99;
+const BARB_NAME = "Варвары";
+const BARB_COLOR = "#6b6b6b";
+const BARB_SPAWN_EVERY = [12, 8, 6];
+const BARB_AGGRO = 4;
+
 const BUILDINGS = {
   granary: { name: "Амбар", cost: 40, tech: "pottery", desc: "+2 еды", effects: { foodFlat: 2 } },
   library: { name: "Библиотека", cost: 50, tech: "writing", desc: "+50% науки", effects: { sciMult: 1.5 } },
@@ -523,6 +529,7 @@ function newGame(diff = 1, opponents = 1, humans = 1) {
     tributes: {},
     pendingTribute: null,
     pendingMapOffer: null,
+    camps: [],
   };
   for (let i = 0; i < S.players.length; i++)
     for (let j = i + 1; j < S.players.length; j++)
@@ -537,6 +544,7 @@ function newGame(diff = 1, opponents = 1, humans = 1) {
     spawn("settler", i, st[0], st[1]);
     spawn("warrior", i, st[0], st[1]);
   }
+  placeCamps();
   computeVision();
   save();
 }
@@ -598,7 +606,7 @@ function computeVision() {
       for (let x = x0; x <= x1; x++) ex[base + x] = 1;
     }
   };
-  for (const u of S.units) mark(u.x, u.y, u.owner, 2 + (UNITS[u.type].recon || 0));
+  for (const u of S.units) if (u.owner !== BARB_ID) mark(u.x, u.y, u.owner, 2 + (UNITS[u.type].recon || 0));
   for (const c of S.cities) mark(c.x, c.y, c.owner, 2);
   if (S.tileOwner) {
     for (let i = 0; i < W * H; i++) {
@@ -662,7 +670,12 @@ function moveUnit(u, x, y) {
   computeVision();
   const c = cityAt(x, y);
   if (c && c.owner !== u.owner && atWar(u.owner, c.owner) && !UNITS[u.type].air && !unitsAt(x, y).some((o) => o.owner === c.owner)) {
-    captureCity(c, u.owner);
+    if (u.owner === BARB_ID) sackCity(c);
+    else captureCity(c, u.owner);
+  }
+  if (u.owner !== BARB_ID && Array.isArray(S.camps)) {
+    const ci = S.camps.findIndex((cp) => cp.x === x && cp.y === y);
+    if (ci !== -1 && !unitsAt(x, y).some((o) => o.owner === BARB_ID)) clearCamp(u.owner, ci);
   }
 }
 
@@ -1878,6 +1891,106 @@ function aiTurnOne(owner) {
   }
 }
 
+function placeCamps() {
+  S.camps = [];
+  const want = S.difficulty === 0 ? 3 : S.difficulty === 2 ? 5 : 4;
+  const pool = [];
+  for (const comp of floodComponents(S.map, isLandTile)) {
+    if (comp.cells.length < 25) continue;
+    for (const i of comp.cells)
+      if (TERRAIN[S.map[i]].passable && (!S.tileOwner || S.tileOwner[i] === -1)) pool.push(i);
+  }
+  for (let n = pool.length - 1; n > 0; n--) {
+    const j = (Math.random() * (n + 1)) | 0;
+    const t = pool[n];
+    pool[n] = pool[j];
+    pool[j] = t;
+  }
+  for (const i of pool) {
+    if (S.camps.length >= want) break;
+    const x = i % W, y = (i / W) | 0;
+    if (S.units.some((u) => dist(u.x, u.y, x, y) < 6)) continue;
+    if (S.camps.some((cp) => dist(cp.x, cp.y, x, y) < 5)) continue;
+    S.camps.push({ x, y, lastSpawn: 0 });
+  }
+}
+
+function barbSpawnType() {
+  let top = 0;
+  for (const p of S.players) top = Math.max(top, p.techs.length);
+  const tier = top >= 11 ? ["swordsman", "knight", "musketman"]
+    : top >= 6 ? ["warrior", "archer", "horseman"]
+    : null;
+  return tier ? tier[(Math.random() * tier.length) | 0] : "warrior";
+}
+
+function barbarianTurn() {
+  for (const u of [...S.units]) {
+    if (u.owner !== BARB_ID || !S.units.includes(u)) continue;
+    let target = null;
+    let bestD = BARB_AGGRO + 1;
+    for (const e of S.units) {
+      if (e.owner === BARB_ID) continue;
+      const d = dist(u.x, u.y, e.x, e.y);
+      if (d < bestD) { bestD = d; target = [e.x, e.y]; }
+    }
+    for (const c of S.cities) {
+      const d = dist(u.x, u.y, c.x, c.y);
+      if (d < bestD) { bestD = d; target = [c.x, c.y]; }
+    }
+    if (target) {
+      while (u.moves > 0) {
+        if (dist(u.x, u.y, target[0], target[1]) <= 1) {
+          if (unitsAt(target[0], target[1]).some((o) => o.owner !== BARB_ID)) { attack(u, target[0], target[1]); break; }
+          if (TERRAIN[S.map[key(target[0], target[1])]].passable) { moveUnit(u, target[0], target[1]); break; }
+          break;
+        }
+        const before = u.x + "," + u.y;
+        stepToward(u, target[0], target[1]);
+        if (u.x + "," + u.y === before) break;
+      }
+      continue;
+    }
+    const camps = Array.isArray(S.camps) ? S.camps : [];
+    if (!camps.length) { u.moves = 0; continue; }
+    const home = camps.slice().sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y))[0];
+    if (dist(u.x, u.y, home.x, home.y) <= 2) { u.moves = 0; continue; }
+    while (u.moves > 0 && dist(u.x, u.y, home.x, home.y) > 2) {
+      const before = u.x + "," + u.y;
+      stepToward(u, home.x, home.y);
+      if (u.x + "," + u.y === before) break;
+    }
+  }
+  const every = BARB_SPAWN_EVERY[S.difficulty] || 8;
+  for (const cp of Array.isArray(S.camps) ? S.camps : []) {
+    if (S.turn - cp.lastSpawn < every) continue;
+    cp.lastSpawn = S.turn;
+    if (S.units.filter((u) => u.owner === BARB_ID && dist(u.x, u.y, cp.x, cp.y) <= 2).length >= 2) continue;
+    spawn(barbSpawnType(), BARB_ID, cp.x, cp.y);
+  }
+}
+
+function sackCity(c) {
+  if (c.sackedTurn != null && S.turn - c.sackedTurn < 3) return;
+  c.pop = Math.max(1, c.pop - 1);
+  c.sackedTurn = S.turn;
+  addLog(`Варвары разграбили ${c.name} (−1 нас.)`);
+}
+
+function clearCamp(owner, ci) {
+  const cp = S.camps[ci];
+  S.camps.splice(ci, 1);
+  const gold = 50 + 10 * Math.floor(S.turn / 50);
+  S.players[owner].gold += gold;
+  const ex = exploredOf(owner);
+  for (let dy = -2; dy <= 2; dy++)
+    for (let dx = -2; dx <= 2; dx++) {
+      const nx = cp.x + dx, ny = cp.y + dy;
+      if (inMap(nx, ny)) ex[key(nx, ny)] = 1;
+    }
+  addLog(`Разграблен лагерь варваров: +${gold}🪙`);
+}
+
 function landCompOf(x, y) {
   const seen = new Set([key(x, y)]);
   const q = [[x, y]];
@@ -1962,6 +2075,7 @@ function stepToward(u, tx, ty) {
 function relKey(i, j) { return i < j ? `${i}:${j}` : `${j}:${i}`; }
 
 function atWar(i, j) {
+  if (i === BARB_ID || j === BARB_ID) return i !== j;
   const r = S.relations && S.relations[relKey(i, j)];
   return !!(r && r.war);
 }
@@ -2380,6 +2494,7 @@ function endTurn() {
   if (S.over) return;
   aiDiplomacy();
   aiTurn();
+  barbarianTurn();
   processEconomy();
   processElections();
   processGovernments();
@@ -2435,6 +2550,7 @@ function load() {
     if (!S.waterComp) S.waterComp = computeWaterComps(S.map);
     if (!Array.isArray(S.impr)) S.impr = new Array(W * H).fill(null);
     if (!Array.isArray(S.tileOwner)) S.tileOwner = new Array(W * H).fill(-1);
+    if (!Array.isArray(S.camps)) S.camps = [];
     if (!Array.isArray(S.players) || S.players.length === 0) return false;
     if (!Array.isArray(S.humanOrder)) S.humanOrder = [0];
     if (!Number.isInteger(S.currentPlayer)) S.currentPlayer = 0;
@@ -2478,6 +2594,7 @@ function load() {
       if (typeof c.revoltPressure !== "number") c.revoltPressure = 0;
       if (typeof c.flipCooldown !== "number") c.flipCooldown = 0;
       if (typeof c.revoltBy !== "number") c.revoltBy = null;
+      if (typeof c.sackedTurn !== "number") c.sackedTurn = -99;
     }
     S.players.forEach((p, i) => {
       p.isHuman = S.humanOrder.includes(i);
@@ -2510,14 +2627,14 @@ export function getVisible() { return visible; }
 
 export {
   TILE, TERRAIN, UNITS, BUILDINGS, WONDERS, SS_PARTS, TECHS, DIFFICULTIES, NATIONS, RELIGIONS, GOVERNMENTS, RESOURCES, W, H, TS, SAVE_KEY,
-  CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD, GREAT_PEOPLE, GP_ORDER,
+  CULTURE_WIN_CITIES, CULTURE_WIN_THRESHOLD, GREAT_PEOPLE, GP_ORDER, BARB_ID, BARB_NAME, BARB_COLOR,
   key, inMap, unitsAt, cityAt, cityById, unitById, isCoastal, isAir,
   newGame, spawn, upgradeCost, upgradeUnit, computeVision, reachable, moveUnit, attack, bombard, foundCity, drownCheck, nextInStack,
   cityYields, cityHappiness, techAvailable, processEconomy, playerGoldPerTurn, buyForGold, endTurn, finishTurn, save, load, legendaryCities,
   foundReligion, checkFoundReligions, spreadReligions, isHolyCity, playerEffects, grantFreeTech, useGreatPerson,
   spreadFaith, declareStateReligion, relWarFactor, councilOwner, councilSupport, processElections, processGovernments, startRevolution,
   relKey, atWar, declareWar, makePeace, offerPeace, strengthOf, aiDiplomacy, offerTechTrade, valueOfDeal, grantTech,
-  offerDeal, dealValue, mapValue, demandTribute, processDeals,
+  offerDeal, dealValue, mapValue, demandTribute, processDeals, barbarianTurn, placeCamps, clearCamp,
   unitAvailable, resourceConnected, resourceOwned, hasMarble, wonderCost, startImprovement, cancelWork,
 };
 
@@ -2535,6 +2652,9 @@ export function debugApi() {
     get RESOURCES() { return RESOURCES; },
     get GREAT_PEOPLE() { return GREAT_PEOPLE; },
     get GP_ORDER() { return GP_ORDER; },
+    get BARB_ID() { return BARB_ID; },
+    get BARB_NAME() { return BARB_NAME; },
+    get BARB_COLOR() { return BARB_COLOR; },
     get CULTURE_WIN_CITIES() { return CULTURE_WIN_CITIES; },
     get CULTURE_WIN_THRESHOLD() { return CULTURE_WIN_THRESHOLD; },
     getNations: () => NATIONS,
@@ -2545,6 +2665,9 @@ export function debugApi() {
     get humanOrder() { return Array.isArray(S.humanOrder) ? S.humanOrder : [0]; },
     aiTurn,
     aiTurnOne,
+    barbarianTurn,
+    placeCamps,
+    clearCamp,
     aiDiplomacy,
     relKey,
     atWar,

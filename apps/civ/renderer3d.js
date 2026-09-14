@@ -536,12 +536,34 @@ export async function createRenderer3D(container, handlers) {
     }
   }
 
+  const campHolders = new Map();
+
+  function syncCamps(vm) {
+    const seen = new Set();
+    for (const cp of vm.camps || []) {
+      const idx = cp.y * vm.W + cp.x;
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      if (campHolders.has(idx)) continue;
+      const g = models.createCampMesh();
+      g.position.set(tileX(cp.x, vm), 0, tileZ(cp.y, vm));
+      tileRoot.add(g);
+      campHolders.set(idx, g);
+    }
+    for (const [idx, g] of campHolders) {
+      if (seen.has(idx)) continue;
+      tileRoot.remove(g);
+      campHolders.delete(idx);
+    }
+  }
+
   function draw(vm) {
     if (destroyed) return;
     mapW = vm.W;
     mapH = vm.H;
     fitSunShadow();
     syncTiles(vm);
+    syncCamps(vm);
     syncEntities(vm);
     syncBorders(vm);
   }
@@ -672,6 +694,7 @@ export async function createRenderer3D(container, handlers) {
     dimCache.clear();
     unitHolders.clear();
     cityHolders.clear();
+    campHolders.clear();
     borderSegs.clear();
     borderMats.clear();
     borderKey = null;

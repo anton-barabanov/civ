@@ -97,6 +97,7 @@ export function createRenderer2D(container, handlers) {
       ctx.stroke();
     }
     ctx.restore();
+    for (const cp of vm.camps || []) drawGlyph("⛺", cp.x, cp.y);
     for (const c of vm.cities) {
       const px = c.x * TS, py = c.y * TS;
       ctx.fillStyle = "rgba(0,0,0,0.35)";
@@ -128,7 +129,7 @@ export function createRenderer2D(container, handlers) {
     }
     const myStack = {};
     for (const u of vm.units) {
-      if (u.owner !== 0) continue;
+      if (u.owner !== vm.currentPlayer) continue;
       const k = u.y * vm.W + u.x;
       myStack[k] = (myStack[k] || 0) + 1;
     }
