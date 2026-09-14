@@ -33,7 +33,7 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
 const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
@@ -47,6 +47,8 @@ const MUT_TARGETS = {
   i: ["const cost = fromRoad && roadDoneAt(k) ? 1 : 2;", "const cost = fromRoad && roadDoneAt(k) ? 2 : 2;"],
   j: ["  if (S.resDeals && S.resDeals.some((d) => (d.from === i && d.to === j) || (d.from === j && d.to === i))) {\n    S.resDeals = S.resDeals.filter((d) => !((d.from === i && d.to === j) || (d.from === j && d.to === i)));\n    purged = true;\n  }\n", ""],
   k: ["const won = r.total > 0 && r.votes >= 0.6 * r.total;", "const won = r.total > 0 && r.votes >= 2.0 * r.total;"],
+  l: ["return n ? Math.max(1, Math.round(n * 0.5)) : 0;", "return n ? Math.max(1, Math.round(n * 0)) : 0;"],
+  m: ['else if (gov.government === "democracy") e.sciMult *= 1.25;', 'else if (gov.government === "democracy") e.sciMult *= 1;'],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -2542,9 +2544,91 @@ if (!fast) {
   check("migrated S5 state survives live turn", s5Err === null && api.S.turn === 2);
 }
 
+api.newGame(1);
+check("per-player explored separate", Array.isArray(api.S.players[0].explored) && api.S.players[0].explored.length === 468 &&
+  api.S.players[0].explored.some((e) => e === 1) && !api.S.explored);
+const mpSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+api.foundCity(mpSettler);
+const mpUnknown = api.S.players[1].explored.filter((e) => e === 0).length;
+check("mapValue formula", mpUnknown >= 400);
+let mpOpen = 0;
+for (let i = 0; i < 468; i++)
+  if (api.S.players[1].explored[i] === 1 && api.S.players[0].explored[i] === 0) mpOpen++;
+check("mapValue matches unknown cells", api.mapValue(1, 0) === Math.max(1, Math.round(mpOpen * 0.5)));
+const mvBefore = api.mapValue(1, 0);
+const mpBefore = api.S.players[0].explored.reduce((a, b) => a + b, 0);
+api.S.players[0].gold = 600;
+const mapDeal = api.offerDeal(1, 0, { give: { map: true }, get: { gold: Math.max(5, Math.round(mvBefore * 2)) } });
+check("map deal accepted", mapDeal.ok === true);
+check("map deal opens tiles for recipient",
+  api.S.players[0].explored.reduce((a, b) => a + b, 0) === mpBefore + mpOpen && api.mapValue(1, 0) === 0);
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+check("map deal blocked in war", (api.declareWar(0, 1), api.offerDeal(0, 1, { give: { map: true }, get: { gold: 50 } }).ok === false));
+
+api.newGame(1);
+const gvSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
+api.foundCity(gvSettler);
+const gvCity = api.S.cities[0];
+check("governments table", !!api.GOVERNMENTS && ["despotism", "monarchy", "democracy"].every((g) => api.GOVERNMENTS[g] && api.GOVERNMENTS[g].name));
+check("start in despotism", api.S.players[0].government === "despotism");
+check("revolution requires tech", api.startRevolution(0, "monarchy").ok === false);
+api.S.players[0].techs.push("monarchy");
+check("revolution starts anarchy", api.startRevolution(0, "monarchy").ok === true && api.S.players[0].anarchy === 3);
+check("revolution blocked during anarchy", api.startRevolution(0, "monarchy").ok === false);
+const sciBase = api.cityYields(gvCity).sci;
+check("anarchy halves science", api.cityYields(gvCity).sci === Math.floor(sciBase * 0.5) || api.cityYields(gvCity).sci <= Math.ceil(sciBase * 0.5));
+for (let i = 0; i < 3; i++) { api.S.over = null; api.endTurn(); }
+check("government takes effect", api.S.players[0].anarchy === 0 && api.S.players[0].government === "monarchy");
+gvCity.pop = 7;
+check("monarchy adds happiness", api.cityHappiness(gvCity).happy === 2);
+gvCity.pop = 4;
+const sciGovBase = api.cityYields(gvCity).sci;
+api.S.players[0].techs.push("democracy");
+api.startRevolution(0, "democracy");
+for (let i = 0; i < 3; i++) { api.S.over = null; api.endTurn(); }
+check("democracy boosts science", api.S.players[0].government === "democracy" &&
+  api.cityYields(gvCity).sci >= Math.round(sciGovBase * 1.25));
+
+api.newGame(1);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const avCity = api.S.cities[0];
+check("air units in table", UT.zeppelin && UT.zeppelin.air === true && UT.bomber && UT.bomber.air === true && UT.bomber.atk === 8);
+const zep = api.spawn("zeppelin", 0, avCity.x, avCity.y);
+let waterTile = -1, mountainTile = -1;
+for (let i = 0; i < api.S.map.length && (waterTile < 0 || mountainTile < 0); i++) {
+  if (api.S.map[i] === 0 && waterTile < 0) waterTile = i;
+  if (api.S.map[i] === 5 && mountainTile < 0) mountainTile = i;
+}
+check("air flies over ocean and mountains", api.canEnter(zep, waterTile % 26, (waterTile / 26) | 0) === true &&
+  api.canEnter(zep, mountainTile % 26, (mountainTile / 26) | 0) === true);
+api.moveUnit(zep, waterTile % 26, (waterTile / 26) | 0);
+check("air unit does not drown", api.S.units.includes(zep));
+const avEnemy = api.spawn("warrior", 1, zep.x + 1, zep.y);
+api.S.map[zep.y * 26 + zep.x] = 1;
+api.S.map[avEnemy.y * 26 + avEnemy.x] = 1;
+zep.moves = 1;
+const attRes = api.attack(zep, avEnemy.x, avEnemy.y);
+check("air cannot melee attack", api.S.units.includes(zep) && zep.moves === 1);
+const bomb = api.spawn("bomber", 0, zep.x, zep.y);
+api.declareWar(0, 1);
+bomb.moves = 1;
+const realRandom = Math.random;
+Math.random = () => 0;
+const bOk = api.bombard(bomb.id, avEnemy.x, avEnemy.y);
+check("bombard kills defender", bOk.ok === true && !api.S.units.includes(avEnemy) && api.S.units.includes(bomb));
+Math.random = () => 0.999;
+const avEnemy2 = api.spawn("warrior", 1, bomb.x + 1, bomb.y);
+api.S.map[avEnemy2.y * 26 + avEnemy2.x] = 1;
+bomb.moves = 1;
+const bMiss = api.bombard(bomb.id, avEnemy2.x, avEnemy2.y);
+Math.random = realRandom;
+check("bombard miss spares bomber", bMiss.ok === true && api.S.units.includes(avEnemy2) && api.S.units.includes(bomb) && bomb.moves === 0);
+bomb.moves = 1;
+check("bombard range limited", api.bombard(bomb.id, Math.min(25, bomb.x + 3), bomb.y).ok === false);
+
 if (!mutation) {
-  const expectFail = {
-    a: "FAIL granary +2 food",
+  const expectFail = {    a: "FAIL granary +2 food",
     b: "FAIL processEconomy updates borders after growth",
     c: "FAIL pyramids +2 prod in all owner cities",
     d: "FAIL AI-AI peace concluded via endTurn",
@@ -2555,8 +2639,10 @@ if (!mutation) {
     i: "FAIL road speed doubles movement reach",
     j: "FAIL declareWar annuls tribute and resource deals",
     k: "FAIL diplomatic victory at 60 percent",
+    l: "FAIL mapValue matches unknown cells",
+    m: "FAIL democracy boosts science",
   };
-  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]) {
+  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"]) {
     let r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     if (r.status === null || r.error) {
       r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
