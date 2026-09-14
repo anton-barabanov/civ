@@ -1227,9 +1227,20 @@ function showHandoff() {
   };
 }
 
+function focusCurrentPlayer() {
+  const S = getState();
+  const cur = S.currentPlayer ?? 0;
+  const u = S.units.find((x) => x.owner === cur);
+  if (u && renderer && renderer.setTarget) {
+    renderer.setTarget(u.x, u.y);
+    refresh();
+  }
+}
+
 function afterTurnStart() {
   const S = getState();
   if ((Array.isArray(S.humanOrder) ? S.humanOrder : [0]).length > 1) { showHandoff(); return; }
+  focusCurrentPlayer();
   refresh();
 }
 

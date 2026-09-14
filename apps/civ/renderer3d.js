@@ -14,6 +14,7 @@ export async function createRenderer3D(container, handlers) {
   const dying = [];
 
   let destroyed = false;
+  let firstFocus = true;
   let rafId = 0;
   let mapW = 0;
   let mapH = 0;
@@ -723,6 +724,15 @@ export async function createRenderer3D(container, handlers) {
     mapW = vm.W;
     mapH = vm.H;
     fitLimits();
+    if (firstFocus) {
+      firstFocus = false;
+      const u = vm.units.find((x) => x.owner === (vm.currentPlayer ?? 0)) || vm.units[0];
+      if (u) {
+        orbit.target.set(tileX(u.x, vm), 0, tileZ(u.y, vm));
+        clampTarget();
+        applyCamera();
+      }
+    }
     fitSunShadow();
     syncTiles(vm);
     syncCamps(vm);
