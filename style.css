@@ -101,6 +101,7 @@ body {
   white-space: nowrap;
 }
 .civ-tech-btn { background: var(--surface-2); color: var(--on-surface); }
+#civ-sound { padding: 6px 9px; font-size: 15px; line-height: 1; }
 .civ-end { background: var(--primary); color: #211a33; }
 .civ-end:hover { filter: brightness(1.06); }
 

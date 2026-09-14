@@ -12,6 +12,7 @@ import {
   BARB_ID, BARB_NAME, BARB_COLOR,
 } from "./core.js";
 import { createRenderer2D } from "./renderer2d.js";
+import { sfx } from "./sound.js";
 
 export { debugApi } from "./core.js";
 
@@ -96,6 +97,8 @@ function buildViewModel() {
 }
 
 let bombMode = false;
+let lastTechCounts = null;
+let lastOver = false;
 
 function onTileClick(x, y) {
   const S = getState();
@@ -107,7 +110,7 @@ function onTileClick(x, y) {
   if (bombMode && sel && sel.owner === cur && sel.type === "bomber") {
     const c = cityAt(x, y);
     const foe = unitsAt(x, y).some((u) => u.owner !== cur) || (c && c.owner !== cur);
-    if (foe && Math.max(Math.abs(sel.x - x), Math.abs(sel.y - y)) <= 2) bombard(sel.id, x, y);
+    if (foe && Math.max(Math.abs(sel.x - x), Math.abs(sel.y - y)) <= 2) { bombard(sel.id, x, y); sfx.combat(); }
     bombMode = false;
     save();
     refresh();
@@ -119,8 +122,8 @@ function onTileClick(x, y) {
     if (reach.has(key(x, y))) {
       const enemies = unitsAt(x, y).some((u) => u.owner !== cur) ||
         (cityAt(x, y) && cityAt(x, y).owner !== cur);
-      if (enemies) attack(sel, x, y);
-      else moveUnit(sel, x, y);
+      if (enemies) { attack(sel, x, y); sfx.combat(); }
+      else { moveUnit(sel, x, y); sfx.move(); }
       if (S.sel && !unitById(S.sel)) S.sel = null;
       save();
       refresh();
@@ -181,6 +184,7 @@ function renderTopbar() {
     </div>
     <div class="topbar-row topbar-actions">
       <button class="civ-tech-btn" id="civ-worldmap">🗺 Карта</button>
+      <button class="civ-tech-btn" id="civ-sound" title="Звук вкл/выкл">${sfx.enabled() ? "🔊" : "🔇"}</button>
       <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
       <button class="civ-tech-btn" id="civ-religion">Религия</button>
       <button class="civ-tech-btn" id="civ-gov">${p.anarchy > 0 ? `<span class="civ-warn">⚖ Анархия: ${p.anarchy}</span>` : `⚖ ${GOVERNMENTS[p.government].name}`}</button>
@@ -194,6 +198,10 @@ function renderTopbar() {
     else showStart(true);
   };
   document.getElementById("civ-worldmap").onclick = showWorldMap;
+  document.getElementById("civ-sound").onclick = () => {
+    sfx.toggle();
+    document.getElementById("civ-sound").innerHTML = sfx.enabled() ? "🔊" : "🔇";
+  };
   document.getElementById("civ-diplo").onclick = showDiplo;
   document.getElementById("civ-religion").onclick = showReligion;
   document.getElementById("civ-gov").onclick = showGov;
@@ -317,7 +325,7 @@ function renderPanel() {
   const f = document.getElementById("civ-found");
   if (f) f.onclick = () => {
     const u = unitById(getState().sel);
-    if (u) { foundCity(u); save(); refresh(); }
+    if (u) { foundCity(u); sfx.city(); save(); refresh(); }
   };
   const fbtn = document.getElementById("civ-farm");
   if (fbtn) fbtn.onclick = () => {
@@ -384,7 +392,25 @@ function renderPanel() {
   };
 }
 
+function detectEvents() {
+  try {
+    const S = getState();
+    const counts = S.players.map((p) => p.techs.length);
+    if (lastTechCounts && lastTechCounts.length === counts.length) {
+      const humans = Array.isArray(S.humanOrder) ? S.humanOrder : [0];
+      if (humans.some((i) => counts[i] > lastTechCounts[i])) sfx.tech();
+    }
+    lastTechCounts = counts;
+    if (!lastOver && S.over) {
+      if (S.over.winner === (S.currentPlayer ?? 0)) sfx.victory();
+      else sfx.defeat();
+    }
+    lastOver = !!S.over;
+  } catch (e) {}
+}
+
 function refresh() {
+  detectEvents();
   renderTopbar();
   renderPanel();
   if (renderer && !handoffOpen) renderer.draw(buildViewModel());
@@ -1265,6 +1291,10 @@ export const civApp = {
     rootEl = root;
     hubCtx = nav;
     const hadSave = load();
+    const clickSfx = (e) => {
+      try { if (e && e.target && e.target.closest && e.target.closest("button")) sfx.click(); } catch (err) {}
+    };
+    rootEl.addEventListener("click", clickSfx);
     root.innerHTML = `
       <div class="topbar" id="civ-top"></div>
       <div class="civ-map-wrap" id="civ-map-wrap">
@@ -1305,10 +1335,13 @@ export const civApp = {
     });
     if (!hadSave) newGame();
     computeVision();
+    lastTechCounts = null;
+    lastOver = !!getState().over;
     refresh();
     showStart(hadSave && !getState().over);
     if (!getState().over && (Array.isArray(getState().humanOrder) ? getState().humanOrder : [0]).length > 1) showHandoff();
     return () => {
+      rootEl.removeEventListener("click", clickSfx);
       closeModal();
       const ho = document.getElementById("civ-handoff");
       if (ho) ho.remove();
