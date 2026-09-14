@@ -49,8 +49,9 @@ export async function createRenderer3D(container, handlers) {
     c.updateProjectionMatrix();
   }
 
-  const PHI_MIN = 0.15, PHI_MAX = 1.35, R_MIN = 4, R_MAX = 40;
-  const orbit = { theta: 0, phi: 0.15, radius: 26, target: new THREE.Vector3(0, 0, 0) };
+  const PHI_MIN = 0.15, PHI_MAX = 1.35, R_MIN = 4;
+  let R_MAX = 40;
+  const orbit = { theta: 0, phi: 0.15, radius: 17, target: new THREE.Vector3(0, 0, 0) };
 
   function applyCamera() {
     const { theta, phi, radius, target } = orbit;
@@ -62,9 +63,27 @@ export async function createRenderer3D(container, handlers) {
     camera.lookAt(target);
   }
 
+  function fitLimits() {
+    if (!mapW || !mapH || !camera.aspect) return;
+    const t = Math.tan(camera.fov * Math.PI / 360);
+    const rH = (mapH / 2 + 0.2) / t;
+    const rW = (mapW / 2 + 0.2) / (t * camera.aspect);
+    R_MAX = Math.max(R_MIN + 2, Math.min(40, Math.floor(Math.min(rW, rH))));
+    if (orbit.radius > R_MAX) {
+      orbit.radius = R_MAX;
+      clampTarget();
+      applyCamera();
+    }
+  }
+
   function clampTarget() {
-    orbit.target.x = Math.max(-mapW / 2 - 2, Math.min(mapW / 2 + 2, orbit.target.x));
-    orbit.target.z = Math.max(-mapH / 2 - 2, Math.min(mapH / 2 + 2, orbit.target.z));
+    const t = Math.tan(camera.fov * Math.PI / 360);
+    const vw = orbit.radius * t * (camera.aspect || 1);
+    const vh = orbit.radius * t;
+    const ax = Math.max(0, mapW / 2 + 0.25 - vw);
+    const az = Math.max(0, mapH / 2 + 0.25 - vh);
+    orbit.target.x = Math.max(-ax, Math.min(ax, orbit.target.x));
+    orbit.target.z = Math.max(-az, Math.min(az, orbit.target.z));
     orbit.target.y = 0;
   }
 
@@ -92,6 +111,7 @@ export async function createRenderer3D(container, handlers) {
 
   function zoom(deltaY) {
     orbit.radius = Math.max(R_MIN, Math.min(R_MAX, orbit.radius * (1 + deltaY * 0.001)));
+    clampTarget();
     applyCamera();
   }
 
@@ -203,6 +223,7 @@ export async function createRenderer3D(container, handlers) {
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
     fitSunShadow();
+    fitLimits();
   }
 
   let ro = null;
@@ -318,6 +339,10 @@ export async function createRenderer3D(container, handlers) {
 
   const unitHolders = new Map();
   const cityHolders = new Map();
+  const prodBarBgGeo = ownGeo(new THREE.BoxGeometry(0.56, 0.02, 0.07));
+  const prodBarFillGeo = ownGeo(new THREE.BoxGeometry(0.5, 0.025, 0.05).translate(0.25, 0, 0));
+  const prodBarBgMat = ownMat(new THREE.MeshBasicMaterial({ color: 0x14141a }));
+  const prodBarFillMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffe14d }));
   const fxRoot = new THREE.Group();
   overlayRoot.add(fxRoot);
 
@@ -457,6 +482,18 @@ export async function createRenderer3D(container, handlers) {
         }
         e.religion = rel;
       }
+      if (!e.barBg) {
+        e.barBg = new THREE.Mesh(prodBarBgGeo, prodBarBgMat);
+        e.barFill = new THREE.Mesh(prodBarFillGeo, prodBarFillMat);
+        e.barBg.position.set(0, 0.58, 0.3);
+        e.barFill.position.set(-0.25, 0.585, 0.3);
+        e.holder.add(e.barBg);
+        e.holder.add(e.barFill);
+      }
+      const ratio = typeof c.prodRatio === "number" ? c.prodRatio : null;
+      e.barBg.visible = ratio !== null;
+      e.barFill.visible = ratio !== null;
+      if (ratio !== null) e.barFill.scale.x = Math.max(0.02, ratio);
       e.holder.position.set(tileX(c.x, vm), 0, tileZ(c.y, vm));
     }
     for (const [id, e] of cityHolders) {
@@ -561,6 +598,7 @@ export async function createRenderer3D(container, handlers) {
     if (destroyed) return;
     mapW = vm.W;
     mapH = vm.H;
+    fitLimits();
     fitSunShadow();
     syncTiles(vm);
     syncCamps(vm);

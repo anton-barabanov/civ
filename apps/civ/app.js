@@ -68,13 +68,20 @@ function buildViewModel() {
     }
   const cities = S.cities
     .filter((c) => explored[key(c.x, c.y)])
-    .map((c) => ({
-      id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner,
-      walls: c.buildings.includes("walls"), religion: c.religion || null,
-      happy: c.happy ?? 1, unhappy: c.unhappy ?? 0, riot: !!c.riot,
-      revolt: (c.revoltPressure || 0) >= 3,
-      wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
-    }));
+    .map((c) => {
+      const def = c.producing
+        ? (c.producing.k === "unit" ? UNITS[c.producing.id] : c.producing.k === "building" ? BUILDINGS[c.producing.id] : c.producing.k === "project" ? SS_PARTS[c.producing.id] : WONDERS[c.producing.id])
+        : null;
+      const cost = c.producing ? (c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : (def ? def.cost : 0)) : 0;
+      return {
+        id: c.id, x: c.x, y: c.y, name: c.name, pop: c.pop, owner: c.owner,
+        walls: c.buildings.includes("walls"), religion: c.religion || null,
+        happy: c.happy ?? 1, unhappy: c.unhappy ?? 0, riot: !!c.riot,
+        revolt: (c.revoltPressure || 0) >= 3,
+        wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
+        prodRatio: c.producing && cost > 0 ? Math.min(1, (c.prodStored || 0) / cost) : null,
+      };
+    });
   const units = S.units
     .filter((u) => (u.owner === cur || visible[key(u.x, u.y)]) && explored[key(u.x, u.y)])
     .map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, owner: u.owner, movesLeft: u.moves, ready: u.owner === cur && u.moves > 0, icon: UNITS[u.type].icon, air: !!UNITS[u.type].air }));

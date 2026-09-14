@@ -111,6 +111,12 @@ export function createRenderer2D(container, handlers) {
       ctx.fillStyle = "#fff";
       ctx.font = "bold 8px sans-serif";
       ctx.fillText(String(c.pop), px + 6, py + TS - 3);
+      if (typeof c.prodRatio === "number") {
+        ctx.fillStyle = "#14141a";
+        ctx.fillRect(px + 4, py + 1, TS - 9, 4);
+        ctx.fillStyle = "#ffe14d";
+        ctx.fillRect(px + 5, py + 2, Math.max(1, (TS - 11) * c.prodRatio), 2);
+      }
       if (c.walls) {
         ctx.font = "10px sans-serif";
         ctx.fillText("🛡", px + TS - 14, py + 11);
