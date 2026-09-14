@@ -109,7 +109,18 @@ export async function createRenderer3D(container, handlers) {
     if (t) cb(t.x, t.y);
   }
 
-  const pointer = { down: false, id: -1, button: 0, shift: false, sx: 0, sy: 0, moved: 0 };
+  const pointer = { down: false, id: -1, button: 0, shift: false, ctrl: false, sx: 0, sy: 0, moved: 0 };
+  let spaceHeld = false;
+
+  const onKeyDown = (e) => {
+    if (e.code === "Space") {
+      spaceHeld = true;
+      if (pointer.down) e.preventDefault();
+    }
+  };
+  const onKeyUp = (e) => {
+    if (e.code === "Space") spaceHeld = false;
+  };
 
   const onPointerDown = (e) => {
     if (pointer.down) return;
@@ -117,6 +128,7 @@ export async function createRenderer3D(container, handlers) {
     pointer.id = e.pointerId;
     pointer.button = e.button;
     pointer.shift = e.shiftKey;
+    pointer.ctrl = e.ctrlKey || e.metaKey;
     pointer.sx = e.clientX;
     pointer.sy = e.clientY;
     pointer.moved = 0;
@@ -130,7 +142,7 @@ export async function createRenderer3D(container, handlers) {
     pointer.sx = e.clientX;
     pointer.sy = e.clientY;
     pointer.moved += Math.abs(dx) + Math.abs(dy);
-    if (pointer.shift || pointer.button === 1 || pointer.button === 2) pan(dx, dy);
+    if (pointer.shift || pointer.ctrl || spaceHeld || pointer.button === 1 || pointer.button === 2) pan(dx, dy);
     else rotate(dx, dy);
   };
 
@@ -162,6 +174,10 @@ export async function createRenderer3D(container, handlers) {
   canvas.addEventListener("pointercancel", onPointerCancel);
   canvas.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("contextmenu", onContext);
+  if (typeof window !== "undefined") {
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+  }
 
   function resize() {
     const w = canvas.clientWidth || 1;
@@ -620,6 +636,10 @@ export async function createRenderer3D(container, handlers) {
     canvas.removeEventListener("pointercancel", onPointerCancel);
     canvas.removeEventListener("wheel", onWheel);
     canvas.removeEventListener("contextmenu", onContext);
+    if (typeof window !== "undefined") {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    }
     if (ro) ro.disconnect();
     else if (typeof window !== "undefined") window.removeEventListener("resize", onWinResize);
     for (const f of effects) {
@@ -648,5 +668,24 @@ export async function createRenderer3D(container, handlers) {
     container.innerHTML = "";
   }
 
-  return { draw, destroy, zoom };
+  function setPhi(v) {
+    orbit.phi = Math.max(PHI_MIN, Math.min(PHI_MAX, v));
+    applyCamera();
+  }
+
+  function getPhi() {
+    return orbit.phi;
+  }
+
+  function setTarget(x, y) {
+    orbit.target.set(x - mapW / 2 + 0.5, 0, y - mapH / 2 + 0.5);
+    clampTarget();
+    applyCamera();
+  }
+
+  function getTarget() {
+    return { x: Math.round(orbit.target.x + mapW / 2 - 0.5), y: Math.round(orbit.target.z + mapH / 2 - 0.5) };
+  }
+
+  return { draw, destroy, zoom, setPhi, getPhi, setTarget, getTarget };
 }

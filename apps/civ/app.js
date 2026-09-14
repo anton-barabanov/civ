@@ -168,6 +168,7 @@ function renderTopbar() {
       <div class="civ-cult" title="Суммарное счастье городов: счастье − недовольство">😊 ${happinessTotal >= 0 ? "+" : ""}${happinessTotal}</div>
     </div>
     <div class="topbar-row topbar-actions">
+      <button class="civ-tech-btn" id="civ-worldmap">🗺 Карта</button>
       <button class="civ-tech-btn" id="civ-diplo">Дипломатия</button>
       <button class="civ-tech-btn" id="civ-religion">Религия</button>
       <button class="civ-tech-btn" id="civ-gov">${p.anarchy > 0 ? `<span class="civ-warn">⚖ Анархия: ${p.anarchy}</span>` : `⚖ ${GOVERNMENTS[p.government].name}`}</button>
@@ -180,6 +181,7 @@ function renderTopbar() {
     if (hubCtx && hubCtx.back) hubCtx.back();
     else showStart(true);
   };
+  document.getElementById("civ-worldmap").onclick = showWorldMap;
   document.getElementById("civ-diplo").onclick = showDiplo;
   document.getElementById("civ-religion").onclick = showReligion;
   document.getElementById("civ-gov").onclick = showGov;
@@ -345,6 +347,57 @@ function refresh() {
   if (renderer) renderer.draw(buildViewModel());
   renderOver();
   renderElectionModal();
+  const te = document.getElementById("civ-tilt");
+  if (te && renderer && renderer.getPhi) {
+    const d = Math.round(renderer.getPhi() * 180 / Math.PI);
+    if (Number(te.value) !== d) te.value = d;
+  }
+}
+
+function showWorldMap() {
+  closeModal();
+  const S = getState();
+  const m = document.createElement("div");
+  m.className = "civ-modal";
+  m.id = "civ-modal";
+  const px = 8;
+  m.innerHTML = `
+    <div class="civ-dialog civ-worldmap">
+      <h2>🗺 Карта мира</h2>
+      <canvas id="civ-worldmap-canvas" width="${W * px}" height="${H * px}"></canvas>
+      <div class="civ-hint">Клик по карте — перенести туда камеру</div>
+      <button class="btn text" id="civ-close">Закрыть</button>
+    </div>
+  `;
+  rootEl.appendChild(m);
+  const cv = document.getElementById("civ-worldmap-canvas");
+  const ctx = cv.getContext("2d");
+  const expl = S.players[0].explored;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const k = key(x, y);
+      ctx.fillStyle = expl[k] ? TERRAIN[S.map[k]].color : "#0a0a0e";
+      ctx.fillRect(x * px, y * px, px - 1, px - 1);
+    }
+  for (const c of S.cities) {
+    if (!expl[key(c.x, c.y)]) continue;
+    ctx.fillStyle = S.players[c.owner].color;
+    ctx.fillRect(c.x * px - 1, c.y * px - 1, px + 1, px + 1);
+  }
+  const t = renderer && renderer.getTarget ? renderer.getTarget() : null;
+  if (t && inMap(t.x, t.y)) {
+    ctx.strokeStyle = "#ffe14d";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(t.x * px - 6, t.y * px - 6, px + 12, px + 12);
+  }
+  cv.onclick = (e) => {
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - r.left) / r.width) * W);
+    const y = Math.floor(((e.clientY - r.top) / r.height) * H);
+    if (inMap(x, y) && renderer && renderer.setTarget) renderer.setTarget(x, y);
+    m.remove();
+  };
+  document.getElementById("civ-close").onclick = closeModal;
 }
 
 let electionModalShown = null;
@@ -1067,6 +1120,10 @@ export const civApp = {
           <button id="civ-zoom-in" title="Приблизить">+</button>
           <button id="civ-zoom-out" title="Отдалить">−</button>
         </div>
+        <div class="civ-tilt">
+          <span>Наклон</span>
+          <input type="range" id="civ-tilt" min="9" max="77" step="1" value="9">
+        </div>
       </div>
       <div id="civ-panel" class="civ-panel"></div>
     `;
@@ -1075,6 +1132,9 @@ export const civApp = {
     swapRenderer();
     document.getElementById("civ-zoom-in").onclick = () => renderer && renderer.zoom && renderer.zoom(-140);
     document.getElementById("civ-zoom-out").onclick = () => renderer && renderer.zoom && renderer.zoom(140);
+    document.getElementById("civ-tilt").oninput = (e) => {
+      if (renderer && renderer.setPhi) renderer.setPhi(Number(e.target.value) * Math.PI / 180);
+    };
     if (!hadSave) newGame();
     computeVision();
     refresh();
