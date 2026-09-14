@@ -11,9 +11,9 @@ const fakeEl = () => {
     appendChild() {},
     querySelectorAll: () => [],
     getContext: () => new Proxy({}, { get: () => () => {}, set: () => true }),
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 884, height: 612 }),
-    width: 884,
-    height: 612,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 36 * 34, height: 24 * 34 }),
+    width: 36 * 34,
+    height: 24 * 34,
   };
 };
 
@@ -64,6 +64,7 @@ if (mutation) {
 
 const { civApp, debugApi } = await import("/tmp/civmod/app.js");
 const api = debugApi();
+const TW = api.W, TH = api.H;
 
 let failures = 0;
 const check = (name, cond) => {
@@ -74,7 +75,7 @@ const check = (name, cond) => {
 const root = fakeEl();
 civApp.mount(root, { back: () => {} });
 
-check("map generated", api.S.map.length === 26 * 18);
+check("map generated", api.S.map.length === TW * TH);
 
 const flood = (map, start, isClass) => {
   const seen = new Set([start]);
@@ -82,12 +83,12 @@ const flood = (map, start, isClass) => {
   let edge = false;
   while (stack.length) {
     const j = stack.pop();
-    const x = j % 26, y = (j / 26) | 0;
-    if (x === 0 || y === 0 || x === 25 || y === 17) edge = true;
+    const x = j % TW, y = (j / TW) | 0;
+    if (x === 0 || y === 0 || x === TW - 1 || y === TH - 1) edge = true;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
-      const k = ny * 26 + nx;
+      if (nx < 0 || ny < 0 || nx >= TW || ny >= TH) continue;
+      const k = ny * TW + nx;
       if (!seen.has(k) && isClass(map[k])) { seen.add(k); stack.push(k); }
     }
   }
@@ -111,7 +112,7 @@ const landComps = allComps(api.S.map, (t) => t !== 0).sort((a, b) => b.cells.len
 const oceanFrac = api.S.map.filter((t) => t === 0).length / api.S.map.length;
 check("no enclosed puddles", waterComps.every((c) => c.edge || c.cells.length >= 6));
 check("multiple continents", landComps.length >= 2);
-check("largest continent size", landComps[0] && landComps[0].cells.length >= 45);
+check("largest continent size", landComps[0] && landComps[0].cells.length >= 80);
 check("ocean fraction sane", oceanFrac > 0.25 && oceanFrac < 0.8);
 
 const fish = api.S.res.filter((r) => r === "fish").length;
@@ -120,7 +121,7 @@ check("sea resources scattered", fish > 3 && whale >= 0);
 
 const start0 = api.S.units.find((u) => u.owner === 0);
 const start1 = api.S.units.find((u) => u.owner === 1);
-const compOf = (x, y) => landComps.findIndex((c) => c.cells.includes(y * 26 + x));
+const compOf = (x, y) => landComps.findIndex((c) => c.cells.includes(y * TW + x));
 check("starts on different continents", compOf(start0.x, start0.y) !== compOf(start1.x, start1.y));
 
 check("4 starting units", api.S.units.length === 4);
@@ -131,7 +132,7 @@ check("no cities yet", api.S.cities.length === 0);
   let genBad = null;
   for (let g = 0; g < 20 && !genBad; g++) {
     api.newGame(1);
-    const comps = allComps(api.S.map, (t) => t !== 0).filter((c) => c.cells.length >= 25);
+    const comps = allComps(api.S.map, (t) => t !== 0).filter((c) => c.cells.length >= 45);
     if (!comps.length) { genBad = "no large continent"; break; }
     for (const comp of comps)
       for (const id of ["iron", "horses", "marble"])
@@ -144,22 +145,22 @@ check("no cities yet", api.S.cities.length === 0);
     }
   }
   check("land resources guaranteed on every large continent", genBad === null);
-  const bigComps = allComps(api.S.map, (t) => t !== 0).filter((c) => c.cells.length >= 25);
+  const bigComps = allComps(api.S.map, (t) => t !== 0).filter((c) => c.cells.length >= 45);
   const minNeed = Math.max(1, bigComps.length);
   const cntRes = (id) => api.S.res.filter((r) => r === id).length;
   check("land resource counts cover all continents", ["iron", "horses", "marble"].every((id) => cntRes(id) >= minNeed) &&
-    ["iron", "horses", "marble"].every((id) => cntRes(id) <= 20));
+    ["iron", "horses", "marble"].every((id) => cntRes(id) <= 30));
   check("RESOURCES table exposed via debugApi", !!api.RESOURCES &&
     ["iron", "horses", "marble", "fish", "whale"].every((id) => api.RESOURCES[id] && api.RESOURCES[id].name && api.RESOURCES[id].icon));
 }
 
 let coastal = null;
 for (let i = 0; i < api.S.map.length; i++) {
-  const x = i % 26, y = (i / 26) | 0;
+  const x = i % TW, y = (i / TW) | 0;
   if (api.S.map[i] === 0 || api.S.map[i] === 5) continue;
   const hasWater = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => {
     const nx = x + dx, ny = y + dy;
-    return nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0;
+    return nx >= 0 && ny >= 0 && nx < TW && ny < TH && api.S.map[ny * TW + nx] === 0;
   });
   if (hasWater) { coastal = [x, y]; break; }
 }
@@ -168,14 +169,14 @@ if (coastal) {
   const w = api.spawn("warrior", 0, coastal[0], coastal[1]);
   const allSea = [[1,0],[-1,0],[0,1],[0,-1]]
     .map(([dx, dy]) => [coastal[0] + dx, coastal[1] + dy])
-    .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0);
+    .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < TW && ny < TH && api.S.map[ny * TW + nx] === 0);
   const seaCand = allSea.filter(([nx, ny]) => [[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => {
     const wx = nx + dx, wy = ny + dy;
-    return wx >= 0 && wy >= 0 && wx < 26 && wy < 18 && api.S.map[wy * 26 + wx] === 0;
+    return wx >= 0 && wy >= 0 && wx < TW && wy < TH && api.S.map[wy * TW + wx] === 0;
   }));
   const r = api.reachable(w);
   check("land unit cannot enter empty water", allSea.length > 0 && ![...r.keys()].some((k) => api.S.map[k] === 0));
-  const seaKey = seaCand.length ? seaCand[0][1] * 26 + seaCand[0][0] : -1;
+  const seaKey = seaCand.length ? seaCand[0][1] * TW + seaCand[0][0] : -1;
   if (seaKey >= 0) {
     const galley = api.spawn("galley", 0, seaCand[0][0], seaCand[0][1]);
     const gr = api.reachable(galley);
@@ -199,12 +200,12 @@ if (coastal) {
     check("galley capacity 2 rejects third unit", !api.reachable(w3).has(seaKey));
     const nextSea = [[1,0],[-1,0],[0,1],[0,-1]]
       .map(([dx, dy]) => [seaCand[0][0] + dx, seaCand[0][1] + dy])
-      .find(([nx, ny]) => nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0);
+      .find(([nx, ny]) => nx >= 0 && ny >= 0 && nx < TW && ny < TH && api.S.map[ny * TW + nx] === 0);
     api.moveUnit(galley, nextSea[0], nextSea[1]);
     check("ship carries passengers", w.x === nextSea[0] && w.y === nextSea[1] && w2.x === nextSea[0] && w2.y === nextSea[1]);
     api.moveUnit(galley, seaCand[0][0], seaCand[0][1]);
     w.moves = 1;
-    check("passenger can disembark to shore", api.reachable(w).has(coastal[1] * 26 + coastal[0]));
+    check("passenger can disembark to shore", api.reachable(w).has(coastal[1] * TW + coastal[0]));
     api.moveUnit(w, coastal[0], coastal[1]);
     check("passenger lands on shore", w.x === coastal[0] && w.y === coastal[1]);
     const origRandom = Math.random;
@@ -243,10 +244,10 @@ for (let i = 0; i < 15 && !api.S.players[0].techs.includes("agriculture"); i++) 
   if (!api.S.cities.some((c) => c.owner === 0)) {
     let li = -1;
     for (let j = 0; j < api.S.map.length; j++) {
-      const x = j % 26, y = (j / 26) | 0;
+      const x = j % TW, y = (j / TW) | 0;
       if (api.S.map[j] !== 0 && !api.S.cities.some((c) => c.x === x && c.y === y)) { li = j; break; }
     }
-    if (li >= 0) api.foundCity(api.spawn("settler", 0, li % 26, (li / 26) | 0));
+    if (li >= 0) api.foundCity(api.spawn("settler", 0, li % TW, (li / TW) | 0));
   }
   api.endTurn();
 }
@@ -288,13 +289,13 @@ const wcId = new Map();
 wcComps.forEach((c, i) => c.cells.forEach((k) => wcId.set(k, i)));
 const byComp = new Map();
 for (let i = 0; i < api.S.map.length; i++) {
-  const x = i % 26, y = (i / 26) | 0;
+  const x = i % TW, y = (i / TW) | 0;
   if (api.S.map[i] === 0) continue;
   if (api.S.cities.some((c) => c.x === x && c.y === y)) continue;
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const nx = x + dx, ny = y + dy;
-    if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
-    const k = ny * 26 + nx;
+    if (nx < 0 || ny < 0 || nx >= TW || ny >= TH) continue;
+    const k = ny * TW + nx;
     if (api.S.map[k] !== 0) continue;
     const id = wcId.get(k);
     if (!byComp.has(id)) byComp.set(id, []);
@@ -324,7 +325,7 @@ if (pair) {
 }
 
 civApp.mount(root, { back: () => {} });
-check("remount ok", api.S.map.length === 26 * 18);
+check("remount ok", api.S.map.length === TW * TH);
 
 api.newGame(2);
 check("difficulty stored", api.S.difficulty === 2);
@@ -344,15 +345,15 @@ const prodHard = diffCity.prodStored;
 check("difficulty scales AI economy", prodHard > prodEasy);
 
 api.newGame(1);
-check("tileOwner init neutral", Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 && api.S.tileOwner.every((o) => o === -1));
+check("tileOwner init neutral", Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === TW * TH && api.S.tileOwner.every((o) => o === -1));
 
 const bSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
 check("foundCity returns true", api.foundCity(bSettler) === true);
 const bc = api.S.cities[0];
-let ringOk = api.getTileOwner()[bc.y * 26 + bc.x] === 0;
+let ringOk = api.getTileOwner()[bc.y * TW + bc.x] === 0;
 for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
   const nx = bc.x + dx, ny = bc.y + dy;
-  if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.getTileOwner()[ny * 26 + nx] !== 0) ringOk = false;
+  if (nx >= 0 && ny >= 0 && nx < TW && ny < TH && api.getTileOwner()[ny * TW + nx] !== 0) ringOk = false;
 }
 check("new city owns radius 1", ringOk);
 
@@ -361,8 +362,8 @@ api.recomputeBorders();
 const own4 = api.getTileOwner();
 const dist2 = [[2,0],[-2,0],[0,2],[0,-2],[2,2],[-2,-2],[2,-2],[-2,2]]
   .map(([dx, dy]) => [bc.x + dx, bc.y + dy])
-  .filter(([x, y]) => x >= 0 && y >= 0 && x < 26 && y < 18);
-check("pop 4 radius 2", dist2.length > 0 && dist2.every(([x, y]) => own4[y * 26 + x] === 0));
+  .filter(([x, y]) => x >= 0 && y >= 0 && x < TW && y < TH);
+check("pop 4 radius 2", dist2.length > 0 && dist2.every(([x, y]) => own4[y * TW + x] === 0));
 
 bc.pop = 1;
 bc.culture = 80;
@@ -370,8 +371,8 @@ api.recomputeBorders();
 const ownC = api.getTileOwner();
 const dist3 = [[3,0],[-3,0],[0,3],[0,-3],[3,3],[-3,-3]]
   .map(([dx, dy]) => [bc.x + dx, bc.y + dy])
-  .filter(([x, y]) => x >= 0 && y >= 0 && x < 26 && y < 18);
-check("culture 80 radius 3", dist3.length > 0 && dist3.every(([x, y]) => ownC[y * 26 + x] === 0));
+  .filter(([x, y]) => x >= 0 && y >= 0 && x < TW && y < TH);
+check("culture 80 radius 3", dist3.length > 0 && dist3.every(([x, y]) => ownC[y * TW + x] === 0));
 check("cityRadius formula", api.cityRadius({ pop: 1, culture: 0 }) === 1 && api.cityRadius({ pop: 10, culture: 500 }) === 4);
 
 api.newGame(1);
@@ -382,7 +383,7 @@ const cityB = api.S.cities.find((c) => c.owner === 1);
 cityB.culture = 80;
 api.recomputeBorders();
 const ownX = api.getTileOwner();
-check("border conflict resolved", ownX[5 * 26 + 5] === 0 && ownX[5 * 26 + 7] === 1 && ownX[4 * 26 + 6] === 1 && ownX[4 * 26 + 4] === 0);
+check("border conflict resolved", ownX[5 * TW + 5] === 0 && ownX[5 * TW + 7] === 1 && ownX[4 * TW + 6] === 1 && ownX[4 * TW + 4] === 0);
 
 const citiesBefore = api.S.cities.length;
 const p0 = api.spawn("settler", 0, 6, 6);
@@ -392,10 +393,10 @@ check("settler not consumed on reject", api.S.cities.length === citiesBefore && 
 
 cityA.pop = 5;
 cityA.culture = 0;
-for (const [x, y] of [[4,4],[4,5],[4,6],[5,4],[5,6],[5,5]]) api.S.map[y * 26 + x] = 1;
-for (const [x, y] of [[6,4],[6,5],[6,6]]) api.S.map[y * 26 + x] = 3;
+for (const [x, y] of [[4,4],[4,5],[4,6],[5,4],[5,6],[5,5]]) api.S.map[y * TW + x] = 1;
+for (const [x, y] of [[6,4],[6,5],[6,6]]) api.S.map[y * TW + x] = 3;
 for (let y = 4; y <= 6; y++)
-  for (let x = 4; x <= 6; x++) api.S.res[y * 26 + x] = null;
+  for (let x = 4; x <= 6; x++) api.S.res[y * TW + x] = null;
 const yF = api.cityYields(cityA);
 api.S.cities = api.S.cities.filter((c) => c !== cityB);
 api.recomputeBorders();
@@ -411,22 +412,22 @@ globalThis.localStorage = {
 delete api.S.tileOwner;
 for (const c of api.S.cities) delete c.culture;
 api.save();
-const rawOld = JSON.parse(store["civ1_save"]);
+const rawOld = JSON.parse(store["civ2_save"]);
 check("old save serialized without borders", !("tileOwner" in rawOld) && rawOld.cities.every((c) => !("culture" in c)));
 check("old save migrates on load", api.load() === true);
 const ownMig = api.getTileOwner();
-check("migration restores borders", Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 &&
-  api.S.cities.every((c) => c.culture === 0) && api.S.cities.every((c) => ownMig[c.y * 26 + c.x] === c.owner));
+check("migration restores borders", Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === TW * TH &&
+  api.S.cities.every((c) => c.culture === 0) && api.S.cities.every((c) => ownMig[c.y * TW + c.x] === c.owner));
 check("migration restores radius 1 borders", api.S.cities.every((c) => {
   for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
     const nx = c.x + dx, ny = c.y + dy;
-    if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && ownMig[ny * 26 + nx] === -1) return false;
+    if (nx >= 0 && ny >= 0 && nx < TW && ny < TH && ownMig[ny * TW + nx] === -1) return false;
   }
   return true;
 }));
 api.save();
-const rawNew = JSON.parse(store["civ1_save"]);
-check("tileOwner serialized as array", Array.isArray(rawNew.tileOwner) && rawNew.tileOwner.length === 26 * 18);
+const rawNew = JSON.parse(store["civ2_save"]);
+check("tileOwner serialized as array", Array.isArray(rawNew.tileOwner) && rawNew.tileOwner.length === TW * TH);
 check("save-load roundtrip borders", api.load() === true && api.getTileOwner().join(",") === rawNew.tileOwner.join(","));
 for (let i = 0; i < 10; i++) api.endTurn();
 check("stable after migration + 10 turns", Array.isArray(api.S.tileOwner) && (api.S.turn === 11 || !!api.S.over));
@@ -575,8 +576,8 @@ const farTiles = [];
 for (let dy = -3; dy <= 3; dy++)
   for (let dx = -3; dx <= 3; dx++) {
     const nx = ebCity.x + dx, ny = ebCity.y + dy;
-    if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) >= 2) farTiles.push(ny * 26 + nx);
+    if (nx < 0 || ny < 0 || nx >= TW || ny >= TH) continue;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) >= 2) farTiles.push(ny * TW + nx);
   }
 check("processEconomy updates borders after growth", farTiles.length > 0 && farTiles.every((k) => ownE[k] === 0));
 
@@ -592,10 +593,10 @@ for (let diff = 0; diff <= 2; diff++) {
         const to = api.getTileOwner();
         let li = -1;
         for (let j = 0; j < api.S.map.length; j++) {
-          const x = j % 26, y = (j / 26) | 0;
+          const x = j % TW, y = (j / TW) | 0;
           if (api.S.map[j] !== 0 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) { li = j; break; }
         }
-        if (li >= 0) api.foundCity(api.spawn("settler", 0, li % 26, (li / 26) | 0));
+        if (li >= 0) api.foundCity(api.spawn("settler", 0, li % TW, (li / TW) | 0));
       }
       api.endTurn();
     }
@@ -603,26 +604,26 @@ for (let diff = 0; diff <= 2; diff++) {
   check(`stress diff ${diff}: 60 turns without exceptions`, stressErr === null);
   const toS = api.getTileOwner();
   check(`stress diff ${diff}: turn advanced`, api.S.turn >= 61);
-  check(`stress diff ${diff}: map intact`, api.S.map.length === 26 * 18 && api.S.map.every((t) => Number.isInteger(t) && t >= 0 && t <= 5));
-  check(`stress diff ${diff}: tileOwner matches cities`, Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 &&
-    api.S.cities.every((c) => toS[c.y * 26 + c.x] === c.owner) &&
+  check(`stress diff ${diff}: map intact`, api.S.map.length === TW * TH && api.S.map.every((t) => Number.isInteger(t) && t >= 0 && t <= 5));
+  check(`stress diff ${diff}: tileOwner matches cities`, Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === TW * TH &&
+    api.S.cities.every((c) => toS[c.y * TW + c.x] === c.owner) &&
     toS.every((o, i) => o === -1 || api.S.cities.some((c) => c.owner === o &&
-      Math.max(Math.abs(c.x - (i % 26)), Math.abs(c.y - ((i / 26) | 0))) <= api.cityRadius(c))));
-  check(`stress diff ${diff}: units within map`, api.S.units.every((u) => u.x >= 0 && u.y >= 0 && u.x < 26 && u.y < 18));
+      Math.max(Math.abs(c.x - (i % TW)), Math.abs(c.y - ((i / TW) | 0))) <= api.cityRadius(c))));
+  check(`stress diff ${diff}: units within map`, api.S.units.every((u) => u.x >= 0 && u.y >= 0 && u.x < TW && u.y < TH));
   check(`stress diff ${diff}: unit types valid`, api.S.units.every((u) => !!UT[u.type]));
   check(`stress diff ${diff}: buildings valid`, api.S.cities.every((c) => c.buildings.every((b) => !!BT[b])));
 }
 
 const freeLandPair = () => {
   for (let j = 0; j < api.S.map.length; j++) {
-    const x = j % 26, y = (j / 26) | 0;
+    const x = j % TW, y = (j / TW) | 0;
     if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
     if (api.S.units.some((u) => Math.abs(u.x - x) <= 1 && Math.abs(u.y - y) <= 1)) continue;
     if (api.S.cities.some((c) => Math.abs(c.x - x) <= 1 && Math.abs(c.y - y) <= 1)) continue;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
-      if (api.S.map[ny * 26 + nx] === 0 || api.S.map[ny * 26 + nx] === 5) continue;
+      if (nx < 0 || ny < 0 || nx >= TW || ny >= TH) continue;
+      if (api.S.map[ny * TW + nx] === 0 || api.S.map[ny * TW + nx] === 5) continue;
       return [[x, y], [nx, ny]];
     }
   }
@@ -666,14 +667,14 @@ check("makePeace restores peace", !api.atWar(0, 1) && api.S.relations["0:1"].sin
 api.newGame(1);
 let capSpot = null;
 for (let j = 0; j < api.S.map.length && !capSpot; j++) {
-  const x = j % 26, y = (j / 26) | 0;
-  if (x < 25 && api.S.map[j] !== 0 && api.S.map[j] !== 5) capSpot = [x, y];
+  const x = j % TW, y = (j / TW) | 0;
+  if (x < TW - 1 && api.S.map[j] !== 0 && api.S.map[j] !== 5) capSpot = [x, y];
 }
 api.foundCity(api.spawn("settler", 1, capSpot[0], capSpot[1]));
 const capCity = api.S.cities[0];
 const capUnit = api.spawn("warrior", 0, capSpot[0] + 1, capSpot[1]);
 capUnit.moves = 1;
-check("enemy city not in reachable at peace", !api.reachable(capUnit).has(capSpot[1] * 26 + capSpot[0]));
+check("enemy city not in reachable at peace", !api.reachable(capUnit).has(capSpot[1] * TW + capSpot[0]));
 api.moveUnit(capUnit, capSpot[0], capSpot[1]);
 check("city capture impossible at peace", capUnit.x === capSpot[0] + 1 && capUnit.moves === 1 && capCity.owner === 1);
 api.declareWar(0, 1);
@@ -684,7 +685,7 @@ api.newGame(1);
 api.S.units = api.S.units.filter((u) => u.owner !== 1);
 let weakSpot = null;
 for (let j = 0; j < api.S.map.length && !weakSpot; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (api.S.map[j] !== 0 && api.S.map[j] !== 5) weakSpot = [x, y];
 }
 api.foundCity(api.spawn("settler", 1, weakSpot[0], weakSpot[1]));
@@ -824,9 +825,9 @@ check("AI-AI trade needs chance", !api.S.players[1].techs.includes("sailing"));
 
 api.newGame(1, 2);
 api.save();
-const rawTt = JSON.parse(store["civ1_save"]);
+const rawTt = JSON.parse(store["civ2_save"]);
 for (const k of Object.keys(rawTt.relations)) delete rawTt.relations[k].lastTradeTurn;
-store["civ1_save"] = JSON.stringify(rawTt);
+store["civ2_save"] = JSON.stringify(rawTt);
 check("old save migrates lastTradeTurn", api.load() === true &&
   Object.values(api.S.relations).every((r) => r.lastTradeTurn === -99));
 api.S.players[0].techs.push("writing");
@@ -868,8 +869,8 @@ api.S.units = api.S.units.filter((u) => u.owner === 0);
 api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
 const spCap = api.S.cities[0];
 api.foundReligion(0, "oracle");
-api.foundCity(api.spawn("settler", 0, spCap.x + 2 <= 25 ? spCap.x + 2 : spCap.x - 2, spCap.y));
-api.foundCity(api.spawn("settler", 0, spCap.x + 12 <= 25 ? spCap.x + 12 : spCap.x - 12, spCap.y));
+api.foundCity(api.spawn("settler", 0, spCap.x + 2 <= TW - 1 ? spCap.x + 2 : spCap.x - 2, spCap.y));
+api.foundCity(api.spawn("settler", 0, spCap.x + 12 <= TW - 1 ? spCap.x + 12 : spCap.x - 12, spCap.y));
 const spNear = api.S.cities[1];
 const spFar = api.S.cities[2];
 spNear.relPressure = 0;
@@ -899,13 +900,13 @@ const seaCap = api.S.cities[0];
 api.S.players[0].techs.push("sailing");
 const coastTiles = [];
 for (let i = 0; i < api.S.map.length; i++) {
-  const x = i % 26, y = (i / 26) | 0;
+  const x = i % TW, y = (i / TW) | 0;
   if (api.S.map[i] === 0) continue;
   const w = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => {
     const wx = x + dx, wy = y + dy;
-    return wx >= 0 && wy >= 0 && wx < 26 && wy < 18 && api.S.map[wy * 26 + wx] === 0;
+    return wx >= 0 && wy >= 0 && wx < TW && wy < TH && api.S.map[wy * TW + wx] === 0;
   });
-  if (w) coastTiles.push({ x, y, comp: api.S.waterComp[(y + w[1]) * 26 + (x + w[0])] });
+  if (w) coastTiles.push({ x, y, comp: api.S.waterComp[(y + w[1]) * TW + (x + w[0])] });
 }
 let seaPair = null;
 for (let i = 0; i < coastTiles.length && !seaPair; i++)
@@ -935,10 +936,10 @@ api.newGame(1);
 api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
 api.foundReligion(0, "oracle");
 api.save();
-const rawRel = JSON.parse(store["civ1_save"]);
+const rawRel = JSON.parse(store["civ2_save"]);
 delete rawRel.religions;
 rawRel.cities.forEach((c) => { delete c.religion; delete c.relPressure; });
-store["civ1_save"] = JSON.stringify(rawRel);
+store["civ2_save"] = JSON.stringify(rawRel);
 check("old save without religion fields migrates", api.load() === true && Array.isArray(api.S.religions) &&
   api.S.religions.length === 0 && api.S.cities.every((c) => c.religion === null && c.relPressure === 0));
 let relMigErr = null;
@@ -949,7 +950,7 @@ api.newGame(1);
 api.S.units = api.S.units.filter((u) => u.owner === 0);
 const wS = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
 api.foundCity(wS);
-api.foundCity(api.spawn("settler", 0, wS.x + 2 <= 25 ? wS.x + 2 : wS.x - 2, wS.y));
+api.foundCity(api.spawn("settler", 0, wS.x + 2 <= TW - 1 ? wS.x + 2 : wS.x - 2, wS.y));
 for (const c of api.S.cities) { c.pop = 1; c.culture = 0; c.foodStored = 0; c.prodStored = 0; c.buildings = []; c.producing = null; }
 const WT = api.WONDERS;
 check("WONDERS table valid", !!WT && Object.keys(WT).length === 10 &&
@@ -980,7 +981,7 @@ api.processEconomy();
 check("greatlibrary +50% sci in all owner cities", api.cityYields(wB).sci === Math.round(bS0 * 1.5));
 
 api.S.players[1].techs.push("masonry", "construction");
-api.foundCity(api.spawn("settler", 1, wA.x, wA.y + 3 <= 17 ? wA.y + 3 : wA.y - 3));
+api.foundCity(api.spawn("settler", 1, wA.x, wA.y + 3 <= TH - 1 ? wA.y + 3 : wA.y - 3));
 const wC = api.S.cities.find((c) => c.owner === 1);
 wC.pop = 1; wC.culture = 0; wC.foodStored = 0; wC.buildings = []; wC.producing = null;
 const cY = api.cityYields(wC).prod;
@@ -1036,10 +1037,10 @@ const migCity = api.S.cities[0];
 api.S.players[0].techs.push("construction");
 migCity.producing = { k: "wonder", id: "greatwall" };
 api.save();
-check("wonders serialized in save", Array.isArray(JSON.parse(store["civ1_save"]).wonders));
-const rawW = JSON.parse(store["civ1_save"]);
+check("wonders serialized in save", Array.isArray(JSON.parse(store["civ2_save"]).wonders));
+const rawW = JSON.parse(store["civ2_save"]);
 delete rawW.wonders;
-store["civ1_save"] = JSON.stringify(rawW);
+store["civ2_save"] = JSON.stringify(rawW);
 check("old save without S.wonders migrates", api.load() === true && Array.isArray(api.S.wonders) &&
   api.S.wonders.length === 0 && api.S.cities[0].producing && api.S.cities[0].producing.k === "wonder");
 let wErr = null;
@@ -1051,7 +1052,7 @@ check("culture win constants exposed", api.CULTURE_WIN_CITIES === 3 && api.CULTU
 const cultSpots = () => {
   const spots = [];
   for (let j = 0; j < api.S.map.length && spots.length < 4; j++) {
-    const x = j % 26, y = (j / 26) | 0;
+    const x = j % TW, y = (j / TW) | 0;
     if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
     if (spots.every(([sx, sy]) => Math.max(Math.abs(sx - x), Math.abs(sy - y)) >= 3)) spots.push([x, y]);
   }
@@ -1123,11 +1124,11 @@ api.newGame(1);
 api.S.units = [];
 let shoreSpot = null;
 for (let j = 0; j < api.S.map.length && !shoreSpot; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const nx = x + dx, ny = y + dy;
-    if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0) { shoreSpot = { x, y, sx: nx, sy: ny }; break; }
+    if (nx >= 0 && ny >= 0 && nx < TW && ny < TH && api.S.map[ny * TW + nx] === 0) { shoreSpot = { x, y, sx: nx, sy: ny }; break; }
   }
 }
 if (shoreSpot) {
@@ -1213,18 +1214,18 @@ const preMap = api.S.map.slice();
 const preRes = api.S.res.slice();
 let psLand = null, psSea = null, psCity = null;
 for (let j = 0; j < preMap.length; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (preMap[j] === 0 || preMap[j] === 5) continue;
   if (!psLand) {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy;
-      if (nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && preMap[ny * 26 + nx] === 0) { psLand = [x, y]; psSea = [nx, ny]; break; }
+      if (nx >= 0 && ny >= 0 && nx < TW && ny < TH && preMap[ny * TW + nx] === 0) { psLand = [x, y]; psSea = [nx, ny]; break; }
     }
   }
   if (psLand && !psCity && Math.max(Math.abs(x - psLand[0]), Math.abs(y - psLand[1])) >= 4) psCity = [x, y];
 }
 if (psLand && psCity) {
-  store["civ1_save"] = JSON.stringify({
+  store["civ2_save"] = JSON.stringify({
     turn: 17, nextId: 100, difficulty: 1,
     map: preMap, res: preRes,
     players: [
@@ -1237,7 +1238,7 @@ if (psLand && psCity) {
       { id: 92, type: "warrior", owner: 1, x: psCity[0], y: psCity[1], moves: 1 },
     ],
     cities: [{ id: 80, owner: 1, x: psCity[0], y: psCity[1], name: "Герговия", pop: 2, foodStored: 0, prodStored: 0, producing: null, buildings: [] }],
-    explored: new Array(26 * 18).fill(0),
+    explored: new Array(TW * TH).fill(0),
     log: ["старый сейв"],
     over: { winner: 1 },
     sel: null,
@@ -1250,12 +1251,12 @@ if (psLand && psCity) {
     api.S.over.winner === 1 && api.S.over.type === "conquest" &&
     api.S.cities[0].religion === null && api.S.cities[0].relPressure === 0 && api.S.cities[0].culture === 0);
   check("pre-S2 migration restores derived world",
-    Array.isArray(api.S.waterComp) && api.S.waterComp.length === 26 * 18 &&
-    Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === 26 * 18 &&
-    api.getTileOwner()[psCity[1] * 26 + psCity[0]] === 1 &&
+    Array.isArray(api.S.waterComp) && api.S.waterComp.length === TW * TH &&
+    Array.isArray(api.S.tileOwner) && api.S.tileOwner.length === TW * TH &&
+    api.getTileOwner()[psCity[1] * TW + psCity[0]] === 1 &&
     Array.isArray(api.S.players[0].cityNames) && api.S.players[0].cityNames.length > 0);
   const preBoarder = api.spawn("warrior", 0, psLand[0], psLand[1]);
-  check("pre-S2 galley keeps transport role", api.reachable(preBoarder).has(psSea[1] * 26 + psSea[0]));
+  check("pre-S2 galley keeps transport role", api.reachable(preBoarder).has(psSea[1] * TW + psSea[0]));
   api.moveUnit(preBoarder, psSea[0], psSea[1]);
   check("pre-S2 galley boards unit", preBoarder.x === psSea[0] && preBoarder.y === psSea[1]);
   api.S.over = null;
@@ -1285,10 +1286,10 @@ if (!fast) {
     const to = api.getTileOwner();
     let li = -1;
     for (let j = 0; j < api.S.map.length; j++) {
-      const x = j % 26, y = (j / 26) | 0;
+      const x = j % TW, y = (j / TW) | 0;
       if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) { li = j; break; }
     }
-    if (li >= 0) api.foundCity(api.spawn("settler", 0, li % 26, (li / 26) | 0));
+    if (li >= 0) api.foundCity(api.spawn("settler", 0, li % TW, (li / TW) | 0));
   };
   let integErr = null, waterAlone = false, invBad = null, aiCitySeen = false;
   try {
@@ -1298,7 +1299,7 @@ if (!fast) {
       api.endTurn();
       if (api.S.cities.some((c) => c.owner > 0)) aiCitySeen = true;
       for (const u of api.S.units) {
-        if (api.isNaval(u) || api.S.map[u.y * 26 + u.x] !== 0) continue;
+        if (api.isNaval(u) || api.S.map[u.y * TW + u.x] !== 0) continue;
         if (!api.S.units.some((s) => api.isNaval(s) && s.owner === u.owner && s.x === u.x && s.y === u.y)) waterAlone = true;
       }
       if ((t + 1) % 10 === 0) {
@@ -1312,7 +1313,7 @@ if (!fast) {
         const wIds = api.S.wonders.map((w) => w.id);
         if (new Set(wIds).size !== wIds.length || api.S.wonders.some((w) => !api.WONDERS[w.id])) invBad = "wonder duplicates";
         const toInv = api.getTileOwner();
-        if (api.S.cities.some((c) => toInv[c.y * 26 + c.x] !== c.owner)) invBad = "tileOwner mismatch";
+        if (api.S.cities.some((c) => toInv[c.y * TW + c.x] !== c.owner)) invBad = "tileOwner mismatch";
         for (let a = 1; a < 4; a++)
           for (let b = a + 1; b < 4; b++) {
             if (!api.atWar(a, b) || (aliveInt(a) && aliveInt(b))) continue;
@@ -1344,24 +1345,24 @@ if (!fast) {
           const to = api.getTileOwner();
           let li = -1;
           for (let j = 0; j < api.S.map.length; j++) {
-            const x = j % 26, y = (j / 26) | 0;
+            const x = j % TW, y = (j / TW) | 0;
             if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) { li = j; break; }
           }
-          if (li >= 0) api.foundCity(api.spawn("settler", 0, li % 26, (li / 26) | 0));
+          if (li >= 0) api.foundCity(api.spawn("settler", 0, li % TW, (li / TW) | 0));
         }
         api.endTurn();
       }
     } catch (e) { sErr = e; }
     check(`${tag}: no exceptions`, sErr === null);
     check(`${tag}: 100 turns advanced`, api.S.turn >= 101);
-    check(`${tag}: world intact`, api.S.map.length === 26 * 18 &&
+    check(`${tag}: world intact`, api.S.map.length === TW * TH &&
       api.S.map.every((t) => Number.isInteger(t) && t >= 0 && t <= 5) &&
-      api.S.units.every((u) => u.x >= 0 && u.y >= 0 && u.x < 26 && u.y < 18 && !!UT[u.type]) &&
+      api.S.units.every((u) => u.x >= 0 && u.y >= 0 && u.x < TW && u.y < TH && !!UT[u.type]) &&
       api.S.cities.every((c) => c.buildings.every((b) => !!BT[b])));
     const toS2 = api.getTileOwner();
-    check(`${tag}: borders consistent`, api.S.cities.every((c) => toS2[c.y * 26 + c.x] === c.owner) &&
+    check(`${tag}: borders consistent`, api.S.cities.every((c) => toS2[c.y * TW + c.x] === c.owner) &&
       toS2.every((o, i) => o === -1 || api.S.cities.some((c) => c.owner === o &&
-        Math.max(Math.abs(c.x - (i % 26)), Math.abs(c.y - ((i / 26) | 0))) <= api.cityRadius(c))));
+        Math.max(Math.abs(c.x - (i % TW)), Math.abs(c.y - ((i / TW) | 0))) <= api.cityRadius(c))));
     const nP = api.S.players.length;
     let diploOk = Object.keys(api.S.relations).length === (nP * (nP - 1)) / 2;
     for (let a = 0; a < nP && diploOk; a++)
@@ -1449,9 +1450,9 @@ check("AI buys economy building at peace", apCity.buildings.includes("market") &
 api.newGame(1);
 api.S.players[0].gold = 77;
 api.save();
-const rawGold = JSON.parse(store["civ1_save"]);
+const rawGold = JSON.parse(store["civ2_save"]);
 rawGold.players.forEach((p) => { delete p.gold; });
-store["civ1_save"] = JSON.stringify(rawGold);
+store["civ2_save"] = JSON.stringify(rawGold);
 check("old save without gold migrates to 50", api.load() === true && api.S.players.every((p) => p.gold === 50));
 api.S.players[0].gold = 64;
 api.save();
@@ -1473,7 +1474,7 @@ api.S.players[0].techs.push("masonry", "bronze", "iron", "wheel", "pottery", "ho
 api.recomputeBorders();
 const ownTiles = [];
 for (let i = 0; i < api.S.tileOwner.length; i++)
-  if (api.S.tileOwner[i] === 0 && i !== gateCity.y * 26 + gateCity.x) ownTiles.push(i);
+  if (api.S.tileOwner[i] === 0 && i !== gateCity.y * TW + gateCity.x) ownTiles.push(i);
 check("swordsman locked without iron despite tech", api.unitAvailable(0, "swordsman") === false);
 check("horseman and knight locked without resources", api.unitAvailable(0, "horseman") === false && api.unitAvailable(0, "knight") === false);
 check("units without resource requirement unaffected", api.unitAvailable(0, "warrior") === true && api.unitAvailable(0, "catapult") === true);
@@ -1546,13 +1547,13 @@ api.newGame(1);
 check("crossbowman locked without machinery", api.unitAvailable(0, "crossbowman") === false);
 const upCoast = (() => {
   for (let i = 0; i < api.S.map.length; i++) {
-    const x = i % 26, y = (i / 26) | 0;
+    const x = i % TW, y = (i / TW) | 0;
     if (api.S.map[i] === 0 || api.S.map[i] === 5) continue;
     if (api.S.cities.some((c) => c.x === x && c.y === y)) continue;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18) continue;
-      if (api.S.map[ny * 26 + nx] === 0) return [x, y];
+      if (nx < 0 || ny < 0 || nx >= TW || ny >= TH) continue;
+      if (api.S.map[ny * TW + nx] === 0) return [x, y];
     }
   }
   return null;
@@ -1646,11 +1647,11 @@ if (!upCoast) {
     if (api.S.tileOwner[i] === 0 && ownedSea === -1) ownedSea = i;
     if (api.S.tileOwner[i] === -1 && freeSea === -1) freeSea = i;
   }
-  const upG = api.spawn("galley", 0, ownedSea % 26, (ownedSea / 26) | 0);
+  const upG = api.spawn("galley", 0, ownedSea % TW, (ownedSea / TW) | 0);
   api.S.players[0].gold = 100;
   check("galley upgraded on owned water", api.upgradeUnit(upG).ok === true && upG.type === "caravel" &&
     api.S.players[0].gold === 60);
-  const upG2 = api.spawn("galley", 0, freeSea % 26, (freeSea / 26) | 0);
+  const upG2 = api.spawn("galley", 0, freeSea % TW, (freeSea / TW) | 0);
   const uprG2 = api.upgradeUnit(upG2);
   check("galley upgrade refused on neutral water", uprG2.ok === false && uprG2.reason.includes("территор") &&
     upG2.type === "galley" && api.S.players[0].gold === 60);
@@ -1658,7 +1659,7 @@ if (!upCoast) {
   let freeLand = -1;
   for (let i = 0; i < api.S.map.length; i++)
     if (api.S.map[i] !== 0 && api.S.map[i] !== 5 && api.S.tileOwner[i] === -1) { freeLand = i; break; }
-  const upOff = api.spawn("warrior", 0, freeLand % 26, (freeLand / 26) | 0);
+  const upOff = api.spawn("warrior", 0, freeLand % TW, (freeLand / TW) | 0);
   api.S.players[0].gold = 999;
   const uprOff = api.upgradeUnit(upOff);
   check("upgrade refused off own territory", uprOff.ok === false && uprOff.reason.includes("территор") &&
@@ -1828,12 +1829,12 @@ api.S.cities = api.S.cities.filter((c) => c === gpHome);
 gpHome.pop = 1; gpHome.culture = 0; gpHome.buildings = []; gpHome.religion = null;
 api.recomputeBorders();
 const gpArt = api.spawn("gp_artist", 0, gpHome.x, gpHome.y);
-const artTileX = gpHome.x + 2 <= 25 ? gpHome.x + 2 : gpHome.x - 2;
-const artBefore = api.getTileOwner()[gpHome.y * 26 + artTileX];
+const artTileX = gpHome.x + 2 <= TW - 1 ? gpHome.x + 2 : gpHome.x - 2;
+const artBefore = api.getTileOwner()[gpHome.y * TW + artTileX];
 const gpArtR = api.useGreatPerson(gpArt.id);
 check("artist adds 100 culture, borders grow instantly", gpArtR.ok === true && gpHome.culture === 100 &&
   !api.S.units.includes(gpArt) && artBefore !== 0 &&
-  api.getTileOwner()[gpHome.y * 26 + artTileX] === 0);
+  api.getTileOwner()[gpHome.y * TW + artTileX] === 0);
 
 const gpSciPair = freeLandPair();
 api.S.players[0].techs = [];
@@ -1864,9 +1865,9 @@ check("AI uses great person in its city", !api.S.units.includes(gpAiSci) &&
 
 api.newGame(1);
 api.save();
-const rawGp = JSON.parse(store["civ1_save"]);
+const rawGp = JSON.parse(store["civ2_save"]);
 rawGp.players.forEach((p) => { delete p.gpPoints; delete p.gpNext; delete p.gpRotate; });
-store["civ1_save"] = JSON.stringify(rawGp);
+store["civ2_save"] = JSON.stringify(rawGp);
 check("old save migrates gp fields", api.load() === true &&
   api.S.players.every((p) => p.gpPoints === 0 && p.gpNext === 30 && p.gpRotate === 0));
 api.S.players[0].gpPoints = 12;
@@ -1897,7 +1898,7 @@ check("buyForGold refuses resource-locked unit", bgBad.ok === false && bgBad.rea
   api.S.players[0].gold === 1000 && !api.S.units.some((u) => u.type === "swordsman"));
 const bgOwn = [];
 for (let i = 0; i < api.S.tileOwner.length; i++)
-  if (api.S.tileOwner[i] === 0 && i !== bgCity.y * 26 + bgCity.x) bgOwn.push(i);
+  if (api.S.tileOwner[i] === 0 && i !== bgCity.y * TW + bgCity.x) bgOwn.push(i);
 api.S.res[bgOwn[0]] = "iron";
 const bgOk = api.buyForGold(bgCity.id, "unit", "swordsman");
 check("buyForGold buys unit once resource connected", bgOk.ok === true &&
@@ -1907,16 +1908,16 @@ check("buyForGold buys unit once resource connected", bgOk.ok === true &&
 api.newGame(1);
 const shipSpots = [];
 for (let j = 0; j < api.S.map.length && shipSpots.length < 3; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
   if (api.S.units.some((u) => Math.abs(u.x - x) <= 2 && Math.abs(u.y - y) <= 2)) continue;
   if (api.S.cities.some((c) => Math.abs(c.x - x) <= 2 && Math.abs(c.y - y) <= 2)) continue;
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const nx = x + dx, ny = y + dy;
-    if (nx < 0 || ny < 0 || nx >= 26 || ny >= 18 || api.S.map[ny * 26 + nx] !== 0) continue;
+    if (nx < 0 || ny < 0 || nx >= TW || ny >= TH || api.S.map[ny * TW + nx] !== 0) continue;
     if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([wx, wy]) => {
       const jx = nx + wx, jy = ny + wy;
-      return jx >= 0 && jy >= 0 && jx < 26 && jy < 18 && api.S.map[jy * 26 + jx] === 0;
+      return jx >= 0 && jy >= 0 && jx < TW && jy < TH && api.S.map[jy * TW + jx] === 0;
     })) continue;
     shipSpots.push({ x, y, sx: nx, sy: ny });
     break;
@@ -1934,9 +1935,9 @@ if (!shipSpot) {
   api.S.players[0].techs.push("bronze", "iron", "machinery", "gunpowder", "feudalism", "sailing");
   const shOwn = [];
   for (let i = 0; i < api.S.tileOwner.length; i++)
-    if (api.S.tileOwner[i] === 0 && i !== shipCity.y * 26 + shipCity.x) shOwn.push(i);
+    if (api.S.tileOwner[i] === 0 && i !== shipCity.y * TW + shipCity.x) shOwn.push(i);
   api.S.res[shOwn[0]] = "iron";
-  const shipTileOwner = api.getTileOwner()[shipSpot.sy * 26 + shipSpot.sx];
+  const shipTileOwner = api.getTileOwner()[shipSpot.sy * TW + shipSpot.sx];
   const shipGalley = api.spawn("galley", 0, shipSpot.sx, shipSpot.sy);
   const shipWar = api.spawn("warrior", 0, shipSpot.x, shipSpot.y);
   api.moveUnit(shipWar, shipSpot.sx, shipSpot.sy);
@@ -1947,7 +1948,7 @@ if (!shipSpot) {
     api.S.players[0].gold === 150);
   const shipNext = [[1, 0], [-1, 0], [0, 1], [0, -1]]
     .map(([dx, dy]) => [shipSpot.sx + dx, shipSpot.sy + dy])
-    .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < 26 && ny < 18 && api.S.map[ny * 26 + nx] === 0)[0];
+    .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < TW && ny < TH && api.S.map[ny * TW + nx] === 0)[0];
   shipGalley.moves = 3;
   api.moveUnit(shipGalley, shipNext[0], shipNext[1]);
   check("upgraded unit remains passenger of moving ship", shipWar.x === shipNext[0] && shipWar.y === shipNext[1] &&
@@ -1971,12 +1972,12 @@ const pre3Res = api.S.res.map((r) => (r === "iron" || r === "horses" || r === "m
 const pre3Sea = pre3Res.filter((r) => r === "fish" || r === "whale").length;
 let p3a = null, p3b = null;
 for (let j = 0; j < pre3Map.length && !p3b; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (pre3Map[j] === 0 || pre3Map[j] === 5) continue;
   if (!p3a) p3a = [x, y];
   else if (x !== p3a[0] || y !== p3a[1]) p3b = [x, y];
 }
-store["civ1_save"] = JSON.stringify({
+store["civ2_save"] = JSON.stringify({
   turn: 20, nextId: 300, difficulty: 1,
   map: pre3Map, res: pre3Res,
   players: [
@@ -1998,7 +1999,7 @@ store["civ1_save"] = JSON.stringify({
     { id: 310, owner: 1, x: p3b[0], y: p3b[1], name: "Герговия", pop: 3, foodStored: 0, prodStored: 0, producing: null, buildings: ["granary"], culture: 10 },
   ],
   wonders: [],
-  explored: new Array(26 * 18).fill(1),
+  explored: new Array(TW * TH).fill(1),
   log: ["старый сейв"],
   over: null,
   sel: null,
@@ -2021,7 +2022,7 @@ if (!fast) {
   const ecoRefound = () => {
     const to = api.getTileOwner();
     for (let j = 0; j < api.S.map.length; j++) {
-      const x = j % 26, y = (j / 26) | 0;
+      const x = j % TW, y = (j / TW) | 0;
       if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) {
         api.foundCity(api.spawn("settler", 0, x, y));
         return;
@@ -2093,7 +2094,7 @@ if (!fast) {
         if (!api.S.cities.some((c) => c.owner === 0) && !api.S.units.some((u) => u.owner === 0 && u.type === "settler")) {
           const to = api.getTileOwner();
           for (let j = 0; j < api.S.map.length; j++) {
-            const x = j % 26, y = (j / 26) | 0;
+            const x = j % TW, y = (j / TW) | 0;
             if (api.S.map[j] !== 0 && api.S.map[j] !== 5 && !api.S.cities.some((c) => c.x === x && c.y === y) && (to[j] === -1 || to[j] === 0)) {
               api.foundCity(api.spawn("settler", 0, x, y));
               break;
@@ -2148,7 +2149,7 @@ check("relWarFactor neutral", api.relWarFactor(0, 1) === 1);
 
 let p1land = null;
 for (let i = 0; i < api.S.map.length && !p1land; i++) {
-  const x = i % 26, y = (i / 26) | 0;
+  const x = i % TW, y = (i / TW) | 0;
   if (api.S.map[i] >= 1 && api.S.map[i] <= 4 && api.S.map[i] !== 5 &&
     Math.max(Math.abs(x - s4city.x), Math.abs(y - s4city.y)) > 3 && !api.S.cities.some((c) => c.x === x && c.y === y))
     p1land = [x, y];
@@ -2157,8 +2158,8 @@ api.foundCity(api.spawn("settler", 1, p1land[0], p1land[1]));
 const p1city = api.S.cities.find((c) => c.owner === 1);
 check("p1 city for missionary", p1city && p1city.owner === 1);
 
-const farmX = Math.min(25, s4city.x + 1), farmY = s4city.y;
-api.S.map[farmY * 26 + farmX] = 1;
+const farmX = Math.min(TW - 1, s4city.x + 1), farmY = s4city.y;
+api.S.map[farmY * TW + farmX] = 1;
 const worker = api.spawn("worker", 0, farmX, farmY);
 check("mine rejected on grass", api.startImprovement(worker.id, "mine").ok === false);
 check("worker starts farm", api.startImprovement(worker.id, "farm").ok === true && worker.work.left === 3);
@@ -2166,14 +2167,14 @@ const wx = worker.x, wy = worker.y;
 api.moveUnit(worker, wx + 1, wy);
 check("busy worker cannot move", worker.x === wx && worker.y === wy);
 api.cancelWork(worker.id);
-check("work cancelled", worker.work === null && !api.S.impr[wy * 26 + wx]);
+check("work cancelled", worker.work === null && !api.S.impr[wy * TW + wx]);
 worker.moves = 1;
 api.startImprovement(worker.id, "farm");
 for (let i = 0; i < 3; i++) api.processEconomy();
-const farmIm = api.S.impr[wy * 26 + wx];
+const farmIm = api.S.impr[wy * TW + wx];
 check("farm completes after 3 turns", !!farmIm && farmIm.kind === "farm" && !("left" in farmIm) && worker.work === null);
 const yFarm = api.cityYields(s4city);
-api.S.impr[wy * 26 + wx] = null;
+api.S.impr[wy * TW + wx] = null;
 const yNoFarm = api.cityYields(s4city);
 check("farm adds food when worked", yFarm.food === yNoFarm.food + 1);
 
@@ -2182,7 +2183,7 @@ check("missionary spreads faith", api.spreadFaith(miss.id).ok === true && p1city
 check("missionary consumed", !api.S.units.includes(miss));
 
 const revSettler = api.spawn("settler", 0, Math.max(0, s4city.x - 2), Math.max(0, s4city.y - 2));
-api.S.map[revSettler.y * 26 + revSettler.x] = 1;
+api.S.map[revSettler.y * TW + revSettler.x] = 1;
 api.foundCity(revSettler);
 const revCity = api.S.cities.find((c) => c.id !== s4city.id && c.owner === 0);
 api.flipCity(revCity, 1);
@@ -2211,7 +2212,7 @@ api.endTurn();
 check("science victory triggers", api.S.over && api.S.over.winner === 0 && api.S.over.type === "space");
 
 api.save();
-const rawS4 = JSON.parse(localStorage.getItem("civ1_save"));
+const rawS4 = JSON.parse(localStorage.getItem("civ2_save"));
 rawS4.space = undefined;
 rawS4.impr = undefined;
 for (const c of rawS4.cities) {
@@ -2219,7 +2220,7 @@ for (const c of rawS4.cities) {
   delete c.revoltPressure; delete c.flipCooldown; delete c.revoltBy;
 }
 for (const p of rawS4.players) delete p.stateReligion;
-localStorage.setItem("civ1_save", JSON.stringify(rawS4));
+localStorage.setItem("civ2_save", JSON.stringify(rawS4));
 check("pre-sprint4 save migrates", api.load() === true && Array.isArray(api.S.impr) && "space" in api.S && api.S.players.every((p) => "stateReligion" in p) && api.S.cities.every((c) => "revoltPressure" in c));
 api.endTurn();
 check("migrated save plays on", api.S.turn >= 1);
@@ -2228,11 +2229,11 @@ api.newGame(1);
 api.S.units = [];
 let roadRun = null;
 for (let j = 0; j < api.S.map.length && !roadRun; j++) {
-  const x = j % 26, y = (j / 26) | 0;
-  if (x > 22 || y === 0 || y === 17) continue;
+  const x = j % TW, y = (j / TW) | 0;
+  if (x > 22 || y === 0 || y === TH - 1) continue;
   let ok = true;
   for (let d = 0; d < 4; d++) {
-    const t = api.S.map[y * 26 + x + d];
+    const t = api.S.map[y * TW + x + d];
     if (t === 0 || t === 5) { ok = false; break; }
   }
   if (ok) roadRun = [x, y];
@@ -2242,11 +2243,11 @@ if (roadRun) {
   ru.moves = 1;
   const rr0 = api.reachable(ru);
   check("off road two tiles out of reach",
-    rr0.has(roadRun[1] * 26 + roadRun[0] + 1) && !rr0.has(roadRun[1] * 26 + roadRun[0] + 2));
-  for (let d = 0; d < 3; d++) api.S.impr[roadRun[1] * 26 + roadRun[0] + d] = { kind: "road" };
+    rr0.has(roadRun[1] * TW + roadRun[0] + 1) && !rr0.has(roadRun[1] * TW + roadRun[0] + 2));
+  for (let d = 0; d < 3; d++) api.S.impr[roadRun[1] * TW + roadRun[0] + d] = { kind: "road" };
   const rr1 = api.reachable(ru);
   check("road speed doubles movement reach",
-    rr1.has(roadRun[1] * 26 + roadRun[0] + 2) && ru.moves === 1);
+    rr1.has(roadRun[1] * TW + roadRun[0] + 2) && ru.moves === 1);
 } else {
   check("off road two tiles out of reach", false);
   check("road speed doubles movement reach", false);
@@ -2298,7 +2299,7 @@ if (!fast) {
   const dlP1City = api.S.cities.find((c) => c.owner === 1);
   const dlP1Tiles = [];
   for (let i = 0; i < api.S.tileOwner.length; i++)
-    if (api.S.tileOwner[i] === 1 && i !== dlP1City.y * 26 + dlP1City.x) dlP1Tiles.push(i);
+    if (api.S.tileOwner[i] === 1 && i !== dlP1City.y * TW + dlP1City.x) dlP1Tiles.push(i);
   api.S.res[dlP1Tiles[0]] = "horses";
   api.S.players[0].techs.push("writing", "horsebackriding");
   const dlRes = api.offerDeal(0, 1, { give: { techs: ["writing"], gold: 14 }, get: { res: ["horses"] } });
@@ -2364,24 +2365,24 @@ if (!fast) {
   api.S.units = [];
   let rbBase = null;
   for (let j = 0; j < api.S.map.length && !rbBase; j++) {
-    const x = j % 26, y = (j / 26) | 0;
-    if (x > 22 || y === 0 || y === 17) continue;
+    const x = j % TW, y = (j / TW) | 0;
+    if (x > 22 || y === 0 || y === TH - 1) continue;
     let ok = true;
     for (let d = 0; d < 3; d++) {
-      const t = api.S.map[y * 26 + x + d];
+      const t = api.S.map[y * TW + x + d];
       if (t === 0 || t === 5) { ok = false; break; }
     }
     if (ok) rbBase = [x, y];
   }
   for (let dy = -1; dy <= 1; dy++)
     for (let dx = -1; dx <= 3; dx++) {
-      api.S.map[(rbBase[1] + dy) * 26 + rbBase[0] + dx] = 1;
-      api.S.res[(rbBase[1] + dy) * 26 + rbBase[0] + dx] = null;
+      api.S.map[(rbBase[1] + dy) * TW + rbBase[0] + dx] = 1;
+      api.S.res[(rbBase[1] + dy) * TW + rbBase[0] + dx] = null;
     }
   api.foundCity(api.spawn("settler", 0, rbBase[0], rbBase[1]));
   api.foundCity(api.spawn("settler", 0, rbBase[0] + 2, rbBase[1]));
   const rbA = api.S.cities[0], rbB = api.S.cities[1];
-  const rbMid = rbBase[1] * 26 + rbBase[0] + 1;
+  const rbMid = rbBase[1] * TW + rbBase[0] + 1;
   const rbW = api.spawn("worker", 0, rbBase[0] + 1, rbBase[1]);
   check("road work started for 2 turns", api.startImprovement(rbW.id, "road").ok === true &&
     rbW.work.left === 2 && api.S.impr[rbMid].kind === "road" && api.S.impr[rbMid].left === 2);
@@ -2399,13 +2400,13 @@ if (!fast) {
   api.S.units = [];
   let slPair = null;
   for (let j = 0; j < api.S.map.length && !slPair; j++) {
-    const x = j % 26, y = (j / 26) | 0;
+    const x = j % TW, y = (j / TW) | 0;
     if (x > 22 || y < 1 || y > 16) continue;
     let land = true, waterBelow = true, waterAbove = true;
     for (let d = 0; d < 3; d++) {
-      if (api.S.map[y * 26 + x + d] === 0 || api.S.map[y * 26 + x + d] === 5) land = false;
-      if (api.S.map[(y - 1) * 26 + x + d] !== 0) waterAbove = false;
-      if (api.S.map[(y + 1) * 26 + x + d] !== 0) waterBelow = false;
+      if (api.S.map[y * TW + x + d] === 0 || api.S.map[y * TW + x + d] === 5) land = false;
+      if (api.S.map[(y - 1) * TW + x + d] !== 0) waterAbove = false;
+      if (api.S.map[(y + 1) * TW + x + d] !== 0) waterBelow = false;
     }
     if (land && (waterBelow || waterAbove)) slPair = [x, y];
   }
@@ -2442,7 +2443,7 @@ if (!fast) {
   api.recomputeBorders();
   const nuOwn = [];
   for (let i = 0; i < api.S.tileOwner.length; i++)
-    if (api.S.tileOwner[i] === 0 && i !== nuCity.y * 26 + nuCity.x) nuOwn.push(i);
+    if (api.S.tileOwner[i] === 0 && i !== nuCity.y * TW + nuCity.x) nuOwn.push(i);
   check("rifleman and cavalry locked without resources",
     api.unitAvailable(0, "rifleman") === false && api.unitAvailable(0, "cavalry") === false);
   check("artillery gated by tech only", api.unitAvailable(0, "artillery") === true);
@@ -2467,11 +2468,11 @@ if (!fast) {
 
   let genRun = null;
   for (let j = 0; j < api.S.map.length && !genRun; j++) {
-    const x = j % 26, y = (j / 26) | 0;
-    if (x > 21 || y === 0 || y === 17) continue;
+    const x = j % TW, y = (j / TW) | 0;
+    if (x > 21 || y === 0 || y === TH - 1) continue;
     let ok = true;
     for (let d = 0; d < 4; d++) {
-      const t = api.S.map[y * 26 + x + d];
+      const t = api.S.map[y * TW + x + d];
       if (t === 0 || t === 5) { ok = false; break; }
     }
     if (ok) {
@@ -2530,12 +2531,12 @@ if (!fast) {
 
   api.newGame(1);
   api.save();
-  const rawS5 = JSON.parse(store["civ1_save"]);
+  const rawS5 = JSON.parse(store["civ2_save"]);
   delete rawS5.elections;
   delete rawS5.resDeals;
   delete rawS5.tributes;
   delete rawS5.pendingTribute;
-  store["civ1_save"] = JSON.stringify(rawS5);
+  store["civ2_save"] = JSON.stringify(rawS5);
   check("pre-S5 save migrates tribute deal and election state", api.load() === true &&
     Array.isArray(api.S.elections) && api.S.elections.length === 0 &&
     Array.isArray(api.S.resDeals) && api.S.resDeals.length === 0 &&
@@ -2547,14 +2548,14 @@ if (!fast) {
 }
 
 api.newGame(1);
-check("per-player explored separate", Array.isArray(api.S.players[0].explored) && api.S.players[0].explored.length === 468 &&
+check("per-player explored separate", Array.isArray(api.S.players[0].explored) && api.S.players[0].explored.length === TW * TH &&
   api.S.players[0].explored.some((e) => e === 1) && !api.S.explored);
 const mpSettler = api.S.units.find((u) => u.owner === 0 && u.type === "settler");
 api.foundCity(mpSettler);
 const mpUnknown = api.S.players[1].explored.filter((e) => e === 0).length;
 check("mapValue formula", mpUnknown >= 400);
 let mpOpen = 0;
-for (let i = 0; i < 468; i++)
+for (let i = 0; i < TW * TH; i++)
   if (api.S.players[1].explored[i] === 1 && api.S.players[0].explored[i] === 0) mpOpen++;
 check("mapValue matches unknown cells", api.mapValue(1, 0) === Math.max(1, Math.round(mpOpen * 0.5)));
 const mvBefore = api.mapValue(1, 0);
@@ -2602,13 +2603,13 @@ for (let i = 0; i < api.S.map.length && (waterTile < 0 || mountainTile < 0); i++
   if (api.S.map[i] === 0 && waterTile < 0) waterTile = i;
   if (api.S.map[i] === 5 && mountainTile < 0) mountainTile = i;
 }
-check("air flies over ocean and mountains", api.canEnter(zep, waterTile % 26, (waterTile / 26) | 0) === true &&
-  api.canEnter(zep, mountainTile % 26, (mountainTile / 26) | 0) === true);
-api.moveUnit(zep, waterTile % 26, (waterTile / 26) | 0);
+check("air flies over ocean and mountains", api.canEnter(zep, waterTile % TW, (waterTile / TW) | 0) === true &&
+  api.canEnter(zep, mountainTile % TW, (mountainTile / TW) | 0) === true);
+api.moveUnit(zep, waterTile % TW, (waterTile / TW) | 0);
 check("air unit does not drown", api.S.units.includes(zep));
 const avEnemy = api.spawn("warrior", 1, zep.x + 1, zep.y);
-api.S.map[zep.y * 26 + zep.x] = 1;
-api.S.map[avEnemy.y * 26 + avEnemy.x] = 1;
+api.S.map[zep.y * TW + zep.x] = 1;
+api.S.map[avEnemy.y * TW + avEnemy.x] = 1;
 zep.moves = 1;
 const attRes = api.attack(zep, avEnemy.x, avEnemy.y);
 check("air cannot melee attack", api.S.units.includes(zep) && zep.moves === 1);
@@ -2621,13 +2622,13 @@ const bOk = api.bombard(bomb.id, avEnemy.x, avEnemy.y);
 check("bombard kills defender", bOk.ok === true && !api.S.units.includes(avEnemy) && api.S.units.includes(bomb));
 Math.random = () => 0.999;
 const avEnemy2 = api.spawn("warrior", 1, bomb.x + 1, bomb.y);
-api.S.map[avEnemy2.y * 26 + avEnemy2.x] = 1;
+api.S.map[avEnemy2.y * TW + avEnemy2.x] = 1;
 bomb.moves = 1;
 const bMiss = api.bombard(bomb.id, avEnemy2.x, avEnemy2.y);
 Math.random = realRandom;
 check("bombard miss spares bomber", bMiss.ok === true && api.S.units.includes(avEnemy2) && api.S.units.includes(bomb) && bomb.moves === 0);
 bomb.moves = 1;
-check("bombard range limited", api.bombard(bomb.id, Math.min(25, bomb.x + 3), bomb.y).ok === false);
+check("bombard range limited", api.bombard(bomb.id, Math.min(TW - 1, bomb.x + 3), bomb.y).ok === false);
 
 const s7Random = Math.random;
 
@@ -2642,14 +2643,14 @@ check("finishTurn hands off 0 to 1 without new round", hs1.handoff === 1 && api.
 const hsSettler1 = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
 let hsFar = -1;
 for (let j = 0; j < api.S.map.length && hsFar === -1; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
   if (api.S.players[0].explored[j] === 0 && api.S.players[1].explored[j] === 0) hsFar = j;
 }
 let hsIso = false;
 if (hsFar !== -1) {
-  hsSettler1.x = hsFar % 26;
-  hsSettler1.y = (hsFar / 26) | 0;
+  hsSettler1.x = hsFar % TW;
+  hsSettler1.y = (hsFar / TW) | 0;
   api.computeVision();
   hsIso = api.S.players[1].explored[hsFar] === 1 && api.S.players[0].explored[hsFar] === 0;
 }
@@ -2687,7 +2688,7 @@ for (const campDiff of [0, 1, 2]) {
   const cps = api.S.camps.slice();
   const startsUnits = api.S.units.slice();
   const placeOk = cps.every((cp) => {
-    const k = cp.y * 26 + cp.x;
+    const k = cp.y * TW + cp.x;
     if (api.S.map[k] === 0 || api.S.map[k] === 5) return false;
     if (api.S.tileOwner[k] !== -1) return false;
     return startsUnits.every((u) => Math.max(Math.abs(u.x - cp.x), Math.abs(u.y - cp.y)) >= 6);
@@ -2695,14 +2696,14 @@ for (const campDiff of [0, 1, 2]) {
   const spreadOk = cps.every((a, i) => cps.every((b, j) => i === j ||
     Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) >= 5));
   check(`barb camps placed on neutral land diff ${campDiff}`,
-    cps.length >= 3 && cps.length <= 5 && placeOk && spreadOk);
+    cps.length >= [5, 7, 8][campDiff] && cps.length <= 8 && placeOk && spreadOk);
 }
 
 api.newGame(1);
 api.S.units = api.S.units.filter((u) => u.owner !== api.BARB_ID);
 let bSpot = null;
 for (let j = 0; j < api.S.map.length && !bSpot; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
   if (api.S.units.every((u) => Math.max(Math.abs(u.x - x), Math.abs(u.y - y)) >= 6)) bSpot = [x, y];
 }
@@ -2743,11 +2744,11 @@ api.S.camps = [];
 api.S.units = api.S.units.filter((u) => u.owner !== api.BARB_ID);
 let agStrip = null;
 for (let j = 0; j < api.S.map.length && !agStrip; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (x > 20) continue;
   let ok = true;
   for (let d = 0; d < 6; d++)
-    if (api.S.map[y * 26 + x + d] === 0 || api.S.map[y * 26 + x + d] === 5) ok = false;
+    if (api.S.map[y * TW + x + d] === 0 || api.S.map[y * TW + x + d] === 5) ok = false;
   if (!ok) continue;
   if (!api.S.units.every((u) => Math.max(Math.abs(u.x - x), Math.abs(u.y - y)) >= 6)) continue;
   agStrip = [x, y];
@@ -2780,7 +2781,7 @@ api.newGame(1);
 api.S.units = [];
 let skSpot = null;
 for (let j = 0; j < api.S.map.length && !skSpot; j++) {
-  const x = j % 26, y = (j / 26) | 0;
+  const x = j % TW, y = (j / TW) | 0;
   if (x > 24) continue;
   if (api.S.map[j] !== 0 && api.S.map[j] !== 5) skSpot = [x, y];
 }
@@ -2803,10 +2804,10 @@ check("sack never drops city below pop 1", skCity.pop === 1 && skCity.owner === 
 
 api.newGame(1);
 const clr0 = api.S.camps[0];
-const clrCorner = [Math.min(25, clr0.x + 2), Math.min(17, clr0.y + 2)];
+const clrCorner = [Math.min(TW - 1, clr0.x + 2), Math.min(TH - 1, clr0.y + 2)];
 const clrGold0 = api.S.players[0].gold;
-const clrExp0 = api.S.players[0].explored[clr0.y * 26 + clr0.x];
-const clrExpC0 = api.S.players[0].explored[clrCorner[1] * 26 + clrCorner[0]];
+const clrExp0 = api.S.players[0].explored[clr0.y * TW + clr0.x];
+const clrExpC0 = api.S.players[0].explored[clrCorner[1] * TW + clrCorner[0]];
 const clrW = api.spawn("warrior", 0, cultSpots()[0][0], cultSpots()[0][1]);
 api.moveUnit(clrW, clr0.x, clr0.y);
 check("camp cleared by moving unit onto it",
@@ -2815,8 +2816,8 @@ check("camp cleared by moving unit onto it",
   api.S.log.some((l) => l.includes("Разграблен лагерь варваров")));
 check("camp clearance reveals surroundings",
   clrExp0 === 0 && clrExpC0 === 0 &&
-  api.S.players[0].explored[clr0.y * 26 + clr0.x] === 1 &&
-  api.S.players[0].explored[clrCorner[1] * 26 + clrCorner[0]] === 1);
+  api.S.players[0].explored[clr0.y * TW + clr0.x] === 1 &&
+  api.S.players[0].explored[clrCorner[1] * TW + clrCorner[0]] === 1);
 api.S.turn = 120;
 const clr1 = api.S.camps[0];
 const clrGold1 = api.S.players[0].gold;
@@ -2876,7 +2877,7 @@ const sp6 = api.spawn("spy", 0, spCity.x, spCity.y);
 spR = api.spyStealTech(sp6.id);
 check("nothing to steal keeps spy alive", spR.ok === false && spR.reason === "нечего красть" &&
   api.S.units.includes(sp6));
-const spGuardX = spCity.x + 1 <= 25 ? spCity.x + 1 : spCity.x - 1;
+const spGuardX = spCity.x + 1 <= TW - 1 ? spCity.x + 1 : spCity.x - 1;
 const spGuard = api.spawn("warrior", 1, spGuardX, spCity.y);
 const spAtt = api.spawn("spy", 0, spCity.x, spCity.y);
 spAtt.moves = 2;
@@ -2952,13 +2953,13 @@ api.newGame(1);
 api.S.units = [];
 const lhCoast = [];
 for (let i = 0; i < api.S.map.length; i++) {
-  const x = i % 26, y = (i / 26) | 0;
+  const x = i % TW, y = (i / TW) | 0;
   if (api.S.map[i] === 0) continue;
   const w = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => {
     const wx = x + dx, wy = y + dy;
-    return wx >= 0 && wy >= 0 && wx < 26 && wy < 18 && api.S.map[wy * 26 + wx] === 0;
+    return wx >= 0 && wy >= 0 && wx < TW && wy < TH && api.S.map[wy * TW + wx] === 0;
   });
-  if (w) lhCoast.push({ x, y, comp: api.S.waterComp[(y + w[1]) * 26 + (x + w[0])] });
+  if (w) lhCoast.push({ x, y, comp: api.S.waterComp[(y + w[1]) * TW + (x + w[0])] });
 }
 let lhPair = null;
 for (let i = 0; i < lhCoast.length && !lhPair; i++)
@@ -3000,12 +3001,12 @@ check("sprint 7 techs reachable", rB === true && rC === true && rE === true &&
 api.newGame(1, 1, 2);
 api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
 api.save();
-const rawS7 = JSON.parse(store["civ1_save"]);
+const rawS7 = JSON.parse(store["civ2_save"]);
 delete rawS7.camps;
 delete rawS7.humanOrder;
 delete rawS7.currentPlayer;
 rawS7.cities.forEach((c) => { delete c.sackedTurn; });
-store["civ1_save"] = JSON.stringify(rawS7);
+store["civ2_save"] = JSON.stringify(rawS7);
 check("pre-S7 save migrates camps handoff and sack fields", api.load() === true &&
   Array.isArray(api.S.camps) && api.S.camps.length === 0 &&
   JSON.stringify(api.S.humanOrder) === "[0]" && api.S.currentPlayer === 0 &&
@@ -3015,6 +3016,29 @@ check("migration recomputes human flags",
 let s7Err = null;
 try { api.S.over = null; api.endTurn(); } catch (e) { s7Err = e; }
 check("migrated S7 save lives one turn", s7Err === null && api.S.turn === 2);
+
+{
+  let minAll = Infinity, saw7 = false, passOk = true, inMap5 = true;
+  for (let g = 0; g < 4; g++) {
+    api.newGame(1, 4);
+    const st = [];
+    for (let p = 0; p < 5; p++) {
+      const u = api.S.units.find((x) => x.owner === p && x.type === "settler");
+      st.push(u);
+      const t = api.S.map[u.y * TW + u.x];
+      if (t === 0 || t === 5) passOk = false;
+      if (u.x < 0 || u.y < 0 || u.x >= TW || u.y >= TH) inMap5 = false;
+    }
+    let mn = Infinity;
+    for (let a = 0; a < st.length; a++)
+      for (let b = a + 1; b < st.length; b++)
+        mn = Math.min(mn, Math.max(Math.abs(st[a].x - st[b].x), Math.abs(st[a].y - st[b].y)));
+    minAll = Math.min(minAll, mn);
+    if (mn >= 7) saw7 = true;
+  }
+  check("36x24 five player starts passable and in map", passOk && inMap5 && minAll >= 3);
+  check("36x24 findStarts ladder reaches distance 7", saw7);
+}
 
 if (!mutation) {
   const expectFail = {    a: "FAIL granary +2 food",
@@ -3042,7 +3066,7 @@ if (!mutation) {
   }
 }
 
-check("suite within time budget", Date.now() - t0 < 60000);
+check("suite within time budget", Date.now() - t0 < 90000);
 
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

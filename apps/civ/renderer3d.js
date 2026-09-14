@@ -13,8 +13,8 @@ export async function createRenderer3D(container, handlers) {
 
   let destroyed = false;
   let rafId = 0;
-  let mapW = 26;
-  let mapH = 18;
+  let mapW = 0;
+  let mapH = 0;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0d12);
@@ -125,7 +125,13 @@ export async function createRenderer3D(container, handlers) {
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(pickMeshes, false);
-    const t = hits.length ? hits[0].object.userData.tile : null;
+    const h = hits.length ? hits[0] : null;
+    let t = h ? h.object.userData.tile : null;
+    if (!t && h && h.object.userData.slabType !== undefined) {
+      const st = slabStores.get(h.object.userData.slabType);
+      const idx = st ? st.tileOf[h.instanceId] : undefined;
+      if (idx !== undefined) t = { x: idx % mapW, y: (idx / mapW) | 0 };
+    }
     if (t) cb(t.x, t.y);
   }
 
@@ -260,6 +266,104 @@ export async function createRenderer3D(container, handlers) {
   function tileX(x, vm) { return x - vm.W / 2 + 0.5; }
   function tileZ(y, vm) { return y - vm.H / 2 + 0.5; }
 
+  const slabStores = new Map();
+  const slabProtos = new Map();
+  const tmpM = new THREE.Matrix4();
+  const tmpC = new THREE.Color();
+  const SLAB_DIM = new THREE.Color(0.45, 0.45, 0.45);
+  const SLAB_LIT = new THREE.Color(1, 1, 1);
+
+  function slabProto(type) {
+    let p = slabProtos.get(type);
+    if (!p) {
+      const g = models.createTerrainMesh(type, 42);
+      let slab = null;
+      for (const child of g.children) if (child.isMesh) { slab = child; break; }
+      p = { geo: slab.geometry, mat: slab.material, y: slab.position.y };
+      g.remove(slab);
+      slabProtos.set(type, p);
+    }
+    return p;
+  }
+
+  function slabStore(type) {
+    let st = slabStores.get(type);
+    if (!st) {
+      st = { mesh: null, cap: 0, count: 0, tileOf: [], instOf: new Map() };
+      slabStores.set(type, st);
+    }
+    return st;
+  }
+
+  function slabEnsure(type, need) {
+    const st = slabStore(type);
+    if (st.mesh && need <= st.cap) return;
+    const p = slabProto(type);
+    const cap = Math.max(64, st.cap * 2, need);
+    const mesh = new THREE.InstancedMesh(p.geo, p.mat, cap);
+    mesh.count = st.count;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    mesh.userData.slabType = type;
+    if (st.mesh) {
+      for (let i = 0; i < st.count; i++) {
+        st.mesh.getMatrixAt(i, tmpM);
+        mesh.setMatrixAt(i, tmpM);
+        if (st.mesh.instanceColor) {
+          st.mesh.getColorAt(i, tmpC);
+          mesh.setColorAt(i, tmpC);
+        }
+      }
+      tileRoot.remove(st.mesh);
+      st.mesh.dispose();
+    }
+    st.mesh = mesh;
+    st.cap = cap;
+    tileRoot.add(mesh);
+  }
+
+  function slabAdd(vm, type, idx, t, dim) {
+    slabEnsure(type, slabStore(type).count + 1);
+    const st = slabStore(type);
+    const id = st.count++;
+    st.mesh.count = st.count;
+    tmpM.makeTranslation(tileX(t.x, vm), slabProto(type).y, tileZ(t.y, vm));
+    st.mesh.setMatrixAt(id, tmpM);
+    st.mesh.setColorAt(id, dim ? SLAB_DIM : SLAB_LIT);
+    st.mesh.instanceMatrix.needsUpdate = true;
+    if (st.mesh.instanceColor) st.mesh.instanceColor.needsUpdate = true;
+    st.tileOf[id] = idx;
+    st.instOf.set(idx, id);
+  }
+
+  function slabRemove(type, idx) {
+    const st = slabStore(type);
+    const id = st.instOf.get(idx);
+    if (id === undefined) return;
+    const last = --st.count;
+    st.mesh.count = st.count;
+    if (id !== last) {
+      st.mesh.getMatrixAt(last, tmpM);
+      st.mesh.setMatrixAt(id, tmpM);
+      st.mesh.getColorAt(last, tmpC);
+      st.mesh.setColorAt(id, tmpC);
+      const moved = st.tileOf[last];
+      st.tileOf[id] = moved;
+      st.instOf.set(moved, id);
+    }
+    st.instOf.delete(idx);
+    st.mesh.instanceMatrix.needsUpdate = true;
+    if (st.mesh.instanceColor) st.mesh.instanceColor.needsUpdate = true;
+  }
+
+  function slabSetDim(type, idx, dim) {
+    const st = slabStore(type);
+    const id = st.instOf.get(idx);
+    if (id === undefined) return;
+    st.mesh.setColorAt(id, dim ? SLAB_DIM : SLAB_LIT);
+    st.mesh.instanceColor.needsUpdate = true;
+  }
+
   function syncTiles(vm) {
     const seen = new Set();
     for (const t of vm.tiles) {
@@ -272,6 +376,7 @@ export async function createRenderer3D(container, handlers) {
         g.position.set(tileX(t.x, vm), 0, tileZ(t.y, vm));
         const kids = [];
         const forest = t.terrain === 3;
+        for (const child of [...g.children]) if (child.isMesh) { g.remove(child); break; }
         g.traverse((o) => {
           if (!o.isMesh) return;
           o.userData.tile = { x: t.x, y: t.y };
@@ -281,14 +386,16 @@ export async function createRenderer3D(container, handlers) {
           kids.push(o);
         });
         tileRoot.add(g);
-        entry = { group: g, kids, dimmed: null, resMesh: null, imprMesh: null, imprVal: null, ocean: t.terrain === 0, x: t.x, y: t.y };
+        entry = { group: g, kids, dimmed: null, resMesh: null, imprMesh: null, imprVal: null, ocean: t.terrain === 0, x: t.x, y: t.y, type: t.terrain };
         tilesMap.set(idx, entry);
+        slabAdd(vm, t.terrain, idx, t, !t.visible);
         if (entry.ocean) oceanGroups.push(entry);
       }
       const dim = !t.visible;
       if (entry.dimmed !== dim) {
         entry.dimmed = dim;
         for (const k of entry.kids) k.material = dim ? dimOf(k.userData.baseMat) : k.userData.baseMat;
+        slabSetDim(entry.type, idx, dim);
       }
       const wantRes = (entry.ocean && t.res && t.visible) ||
         (!entry.ocean && t.res && LAND_RES[t.res] && t.explored);
@@ -316,11 +423,13 @@ export async function createRenderer3D(container, handlers) {
     for (const [idx, entry] of tilesMap) {
       if (seen.has(idx)) continue;
       tileRoot.remove(entry.group);
+      slabRemove(entry.type, idx);
       tilesMap.delete(idx);
       const oi = oceanGroups.indexOf(entry);
       if (oi >= 0) oceanGroups.splice(oi, 1);
     }
     pickMeshes = [];
+    for (const st of slabStores.values()) if (st.mesh && st.count > 0) pickMeshes.push(st.mesh);
     for (const entry of tilesMap.values()) for (const k of entry.kids) pickMeshes.push(k);
   }
 
@@ -730,6 +839,9 @@ export async function createRenderer3D(container, handlers) {
     for (const m of own.mats) m.dispose();
     for (const m of dimCache.values()) m.dispose();
     dimCache.clear();
+    for (const st of slabStores.values()) if (st.mesh) st.mesh.dispose();
+    slabStores.clear();
+    slabProtos.clear();
     unitHolders.clear();
     cityHolders.clear();
     campHolders.clear();

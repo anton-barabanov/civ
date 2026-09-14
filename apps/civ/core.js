@@ -173,8 +173,8 @@ const NATIONS = [
   { name: "Персия", color: "#e07b39", cityNames: ["Персеполь", "Сузы", "Экбатана", "Вавилон", "Пасаргады", "Тиспа", "Дербент", "Артакса"] },
 ];
 
-const W = 26, H = 18, TS = 34;
-const SAVE_KEY = "civ1_save";
+const W = 36, H = 24, TS = 34;
+const SAVE_KEY = "civ2_save";
 
 let S = null;
 let visible = null;
@@ -312,7 +312,7 @@ function scatterResources(map) {
 }
 
 function scatterLandResources(map, res) {
-  const targets = { iron: 6, horses: 5, marble: 4 };
+  const targets = { iron: 11, horses: 9, marble: 7 };
   for (const id in targets) {
     const cand = [];
     for (let i = 0; i < W * H; i++)
@@ -325,7 +325,7 @@ function scatterLandResources(map, res) {
 
 function guaranteeLandResources(map, res) {
   const cityOn = (i) => S && S.cities && S.cities.some((c) => key(c.x, c.y) === i);
-  const comps = floodComponents(map, isLandTile).filter((c) => c.cells.length >= 25);
+  const comps = floodComponents(map, isLandTile).filter((c) => c.cells.length >= 45);
   for (const comp of comps) {
     for (const id of ["iron", "horses", "marble"]) {
       if (comp.cells.some((i) => res[i] === id)) continue;
@@ -339,7 +339,7 @@ function guaranteeLandResources(map, res) {
 
 function carveChannel(map) {
   const comp = largestLandComponent(map);
-  if (comp.size < 90) return false;
+  if (comp.size < 165) return false;
   let minX = W, minY = H, maxX = 0, maxY = 0;
   for (const i of comp) {
     const x = i % W, y = (i / W) | 0;
@@ -380,9 +380,9 @@ function generateMap() {
     cleanupBodies(map);
     lastMap = map;
     const comps = floodComponents(map, isLandTile)
-      .filter((c) => c.cells.length >= 25)
+      .filter((c) => c.cells.length >= 45)
       .sort((a, b) => b.cells.length - a.cells.length);
-    if (comps.length < 2 || comps[0].cells.length < 45 || comps[1].cells.length < 25) continue;
+    if (comps.length < 2 || comps[0].cells.length < 80 || comps[1].cells.length < 45) continue;
     const keep = new Set();
     comps.forEach((c) => c.cells.forEach((i) => keep.add(i)));
     for (let i = 0; i < W * H; i++)
@@ -394,7 +394,7 @@ function generateMap() {
   carveChannel(map);
   cleanupBodies(map);
   const comps = floodComponents(map, isLandTile)
-    .filter((c) => c.cells.length >= 25)
+    .filter((c) => c.cells.length >= 45)
     .sort((a, b) => b.cells.length - a.cells.length);
   if (comps.length >= 2) {
     const keep = new Set();
@@ -455,7 +455,7 @@ function findStarts(k) {
   const xy = (i) => [i % W, (i / W) | 0];
   const cdist = (i, j) => { const [a, b] = xy(i), [c, d] = xy(j); return dist(a, b, c, d); };
   let result = null;
-  for (const minD of [6, 4, 2]) {
+  for (const minD of [7, 5, 3]) {
     const sel = [];
     for (const comp of comps) {
       if (sel.length >= k) break;
@@ -2035,10 +2035,10 @@ function aiTurnOne(owner) {
 
 function placeCamps() {
   S.camps = [];
-  const want = S.difficulty === 0 ? 3 : S.difficulty === 2 ? 5 : 4;
+  const want = S.difficulty === 0 ? 5 : S.difficulty === 2 ? 8 : 7;
   const pool = [];
   for (const comp of floodComponents(S.map, isLandTile)) {
-    if (comp.cells.length < 25) continue;
+    if (comp.cells.length < 45) continue;
     for (const i of comp.cells)
       if (TERRAIN[S.map[i]].passable && (!S.tileOwner || S.tileOwner[i] === -1)) pool.push(i);
   }
@@ -2849,6 +2849,8 @@ export {
 export function debugApi() {
   return {
     get S() { return S; },
+    get W() { return W; },
+    get H() { return H; },
     get TECHS() { return TECHS; },
     get UNITS() { return UNITS; },
     get BUILDINGS() { return BUILDINGS; },
