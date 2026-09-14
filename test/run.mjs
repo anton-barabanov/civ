@@ -33,7 +33,7 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
 const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
@@ -49,6 +49,8 @@ const MUT_TARGETS = {
   k: ["const won = r.total > 0 && r.votes >= 0.6 * r.total;", "const won = r.total > 0 && r.votes >= 2.0 * r.total;"],
   l: ["return n ? Math.max(1, Math.round(n * 0.5)) : 0;", "return n ? Math.max(1, Math.round(n * 0)) : 0;"],
   m: ['else if (gov.government === "democracy") e.sciMult *= 1.25;', 'else if (gov.government === "democracy") e.sciMult *= 1;'],
+  n: ["const BARB_SPAWN_EVERY = [12, 8, 6];", "const BARB_SPAWN_EVERY = [99, 99, 99];"],
+  o: ["const chance = counter ? 0.3 : 0.6;", "const chance = counter ? 0.3 : 0.0;"],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -2627,6 +2629,393 @@ check("bombard miss spares bomber", bMiss.ok === true && api.S.units.includes(av
 bomb.moves = 1;
 check("bombard range limited", api.bombard(bomb.id, Math.min(25, bomb.x + 3), bomb.y).ok === false);
 
+const s7Random = Math.random;
+
+api.newGame(1, 1, 2);
+check("hot-seat setup: two humans in order [0,1]", api.S.players.length === 3 &&
+  JSON.stringify(api.S.humanOrder) === "[0,1]" &&
+  api.S.players[0].isHuman === true && api.S.players[1].isHuman === true && api.S.players[2].isHuman === false);
+api.S.sel = 42;
+const hs1 = api.finishTurn();
+check("finishTurn hands off 0 to 1 without new round", hs1.handoff === 1 && api.S.currentPlayer === 1 &&
+  api.S.turn === 1 && api.S.sel === null);
+const hsSettler1 = api.S.units.find((u) => u.owner === 1 && u.type === "settler");
+let hsFar = -1;
+for (let j = 0; j < api.S.map.length && hsFar === -1; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
+  if (api.S.players[0].explored[j] === 0 && api.S.players[1].explored[j] === 0) hsFar = j;
+}
+let hsIso = false;
+if (hsFar !== -1) {
+  hsSettler1.x = hsFar % 26;
+  hsSettler1.y = (hsFar / 26) | 0;
+  api.computeVision();
+  hsIso = api.S.players[1].explored[hsFar] === 1 && api.S.players[0].explored[hsFar] === 0;
+}
+check("visibility switches to active human, explored isolated", hsIso);
+const hs2 = api.finishTurn();
+check("finishTurn from last human completes round", hs2.handoff === 0 && api.S.currentPlayer === 0 && api.S.turn === 2);
+api.S.players[0].techs.push("writing");
+api.S.players[1].techs.push("sailing");
+const hsDeal = api.offerTechTrade(0, 1, "writing", "sailing");
+check("human-human tech trade allowed", hsDeal.ok === true &&
+  api.S.players[0].techs.includes("sailing") && api.S.players[1].techs.includes("writing") &&
+  api.S.relations["0:1"].lastTradeTurn === api.S.turn &&
+  api.S.log.some((l) => l.includes("Обмен технологиями:")));
+api.S.players[0].techs.push("pottery");
+api.S.players[1].techs.push("mysticism");
+const hsDeal2 = api.offerTechTrade(0, 1, "pottery", "mysticism");
+check("human-human trade respects cooldown", hsDeal2.ok === false && hsDeal2.reason.includes("недавно") &&
+  !api.S.players[0].techs.includes("mysticism"));
+api.S.units = api.S.units.filter((u) => u.owner !== 1);
+api.S.cities = api.S.cities.filter((c) => c.owner !== 1);
+const hs3 = api.finishTurn();
+check("eliminated human skipped in handoff", hs3.handoff === 0 && api.S.currentPlayer === 0 && api.S.turn === 3);
+api.S.over = { winner: 0, type: "culture" };
+check("no handoff after game over", api.finishTurn().handoff === null);
+
+api.newGame(1, 1, 2);
+api.S.units = api.S.units.filter((u) => u.owner === 1);
+api.S.cities = [];
+api.S.over = null;
+api.endTurn();
+check("victory of second human recognized", api.S.over && api.S.over.winner === 1 && api.S.over.type === "conquest");
+
+for (const campDiff of [0, 1, 2]) {
+  api.newGame(campDiff);
+  const cps = api.S.camps.slice();
+  const startsUnits = api.S.units.slice();
+  const placeOk = cps.every((cp) => {
+    const k = cp.y * 26 + cp.x;
+    if (api.S.map[k] === 0 || api.S.map[k] === 5) return false;
+    if (api.S.tileOwner[k] !== -1) return false;
+    return startsUnits.every((u) => Math.max(Math.abs(u.x - cp.x), Math.abs(u.y - cp.y)) >= 6);
+  });
+  const spreadOk = cps.every((a, i) => cps.every((b, j) => i === j ||
+    Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) >= 5));
+  check(`barb camps placed on neutral land diff ${campDiff}`,
+    cps.length >= 3 && cps.length <= 5 && placeOk && spreadOk);
+}
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner !== api.BARB_ID);
+let bSpot = null;
+for (let j = 0; j < api.S.map.length && !bSpot; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (api.S.map[j] === 0 || api.S.map[j] === 5) continue;
+  if (api.S.units.every((u) => Math.max(Math.abs(u.x - x), Math.abs(u.y - y)) >= 6)) bSpot = [x, y];
+}
+const barbsNow = () => api.S.units.filter((u) => u.owner === api.BARB_ID);
+let timerOk = bSpot !== null;
+if (bSpot) {
+  for (const [bDiff, every] of [[0, 12], [1, 8], [2, 6]]) {
+    api.S.difficulty = bDiff;
+    for (const t of [every - 1, every]) {
+      api.S.turn = t;
+      api.S.camps = [{ x: bSpot[0], y: bSpot[1], lastSpawn: 0 }];
+      api.S.units = api.S.units.filter((u) => u.owner !== api.BARB_ID);
+      api.barbarianTurn();
+      if (barbsNow().length !== (t === every ? 1 : 0)) timerOk = false;
+    }
+  }
+}
+check("barbarian spawn honors difficulty timer", timerOk &&
+  barbsNow().every((u) => u.type === "warrior"));
+let capOk = false;
+if (bSpot) {
+  api.S.difficulty = 1;
+  api.S.turn = 20;
+  api.S.camps = [{ x: bSpot[0], y: bSpot[1], lastSpawn: 0 }];
+  api.S.units = api.S.units.filter((u) => u.owner !== api.BARB_ID);
+  api.spawn("warrior", api.BARB_ID, bSpot[0], bSpot[1]);
+  api.spawn("warrior", api.BARB_ID, bSpot[0], bSpot[1]);
+  api.barbarianTurn();
+  capOk = barbsNow().length === 2;
+}
+check("camp guard cap blocks spawn at 2", capOk);
+check("spawned barbarians belong to hidden player 99",
+  barbsNow().length > 0 && barbsNow().every((u) => u.owner === 99) &&
+  api.S.players.length === 2 && !api.S.players[99]);
+
+api.newGame(1);
+api.S.camps = [];
+api.S.units = api.S.units.filter((u) => u.owner !== api.BARB_ID);
+let agStrip = null;
+for (let j = 0; j < api.S.map.length && !agStrip; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (x > 20) continue;
+  let ok = true;
+  for (let d = 0; d < 6; d++)
+    if (api.S.map[y * 26 + x + d] === 0 || api.S.map[y * 26 + x + d] === 5) ok = false;
+  if (!ok) continue;
+  if (!api.S.units.every((u) => Math.max(Math.abs(u.x - x), Math.abs(u.y - y)) >= 6)) continue;
+  agStrip = [x, y];
+}
+if (agStrip) {
+  const agBarb = api.spawn("warrior", api.BARB_ID, agStrip[0], agStrip[1]);
+  const agVictim = api.spawn("settler", 1, agStrip[0] + 5, agStrip[1]);
+  api.barbarianTurn();
+  check("barbs ignore targets beyond radius 4",
+    agBarb.x === agStrip[0] && agBarb.y === agStrip[1] && api.S.units.includes(agVictim));
+  api.moveUnit(agVictim, agStrip[0] + 4, agStrip[1]);
+  agBarb.moves = 1;
+  api.barbarianTurn();
+  check("barbs pursue targets within radius 4",
+    Math.max(Math.abs(agBarb.x - agVictim.x), Math.abs(agBarb.y - agVictim.y)) === 3 &&
+    api.S.units.includes(agVictim));
+  agBarb.x = agVictim.x - 1;
+  agBarb.y = agVictim.y;
+  agBarb.moves = 1;
+  Math.random = () => 0;
+  try { api.barbarianTurn(); } finally { Math.random = s7Random; }
+  check("barbs attack adjacent enemies", !api.S.units.includes(agVictim));
+} else {
+  check("barbs ignore targets beyond radius 4", false);
+  check("barbs pursue targets within radius 4", false);
+  check("barbs attack adjacent enemies", false);
+}
+
+api.newGame(1);
+api.S.units = [];
+let skSpot = null;
+for (let j = 0; j < api.S.map.length && !skSpot; j++) {
+  const x = j % 26, y = (j / 26) | 0;
+  if (x > 24) continue;
+  if (api.S.map[j] !== 0 && api.S.map[j] !== 5) skSpot = [x, y];
+}
+api.foundCity(api.spawn("settler", 1, skSpot[0], skSpot[1]));
+const skCity = api.S.cities[0];
+skCity.pop = 5;
+api.moveUnit(api.spawn("warrior", api.BARB_ID, skSpot[0] + 1, skSpot[1]), skCity.x, skCity.y);
+check("barb raid sacks city pop-1", skCity.pop === 4 && skCity.owner === 1 &&
+  skCity.sackedTurn === api.S.turn && api.S.log.some((l) => l.includes("разграбили")));
+api.S.turn += 1;
+api.moveUnit(api.spawn("warrior", api.BARB_ID, skSpot[0] - 1 >= 0 ? skSpot[0] - 1 : skSpot[0] + 1, skSpot[1]), skCity.x, skCity.y);
+check("sack cooldown blocks repeat raid", skCity.pop === 4 && skCity.sackedTurn === api.S.turn - 1);
+api.S.turn += 2;
+api.moveUnit(api.spawn("warrior", api.BARB_ID, skSpot[0] + 1, skSpot[1]), skCity.x, skCity.y);
+check("sack repeats after cooldown", skCity.pop === 3 && skCity.sackedTurn === api.S.turn && skCity.owner === 1);
+skCity.pop = 1;
+api.S.turn += 3;
+api.moveUnit(api.spawn("warrior", api.BARB_ID, skSpot[0] + 1, skSpot[1]), skCity.x, skCity.y);
+check("sack never drops city below pop 1", skCity.pop === 1 && skCity.owner === 1);
+
+api.newGame(1);
+const clr0 = api.S.camps[0];
+const clrCorner = [Math.min(25, clr0.x + 2), Math.min(17, clr0.y + 2)];
+const clrGold0 = api.S.players[0].gold;
+const clrExp0 = api.S.players[0].explored[clr0.y * 26 + clr0.x];
+const clrExpC0 = api.S.players[0].explored[clrCorner[1] * 26 + clrCorner[0]];
+const clrW = api.spawn("warrior", 0, cultSpots()[0][0], cultSpots()[0][1]);
+api.moveUnit(clrW, clr0.x, clr0.y);
+check("camp cleared by moving unit onto it",
+  !api.S.camps.some((cp) => cp.x === clr0.x && cp.y === clr0.y) &&
+  api.S.players[0].gold === clrGold0 + 50 &&
+  api.S.log.some((l) => l.includes("Разграблен лагерь варваров")));
+check("camp clearance reveals surroundings",
+  clrExp0 === 0 && clrExpC0 === 0 &&
+  api.S.players[0].explored[clr0.y * 26 + clr0.x] === 1 &&
+  api.S.players[0].explored[clrCorner[1] * 26 + clrCorner[0]] === 1);
+api.S.turn = 120;
+const clr1 = api.S.camps[0];
+const clrGold1 = api.S.players[0].gold;
+api.moveUnit(api.spawn("warrior", 0, cultSpots()[0][0], cultSpots()[0][1]), clr1.x, clr1.y);
+check("camp reward scales with era", api.S.players[0].gold === clrGold1 + 70);
+
+const coreSrcS7 = readFileSync("apps/civ/core.js", "utf8");
+check("core never reads S.players[99]",
+  !coreSrcS7.includes("players[BARB_ID]") && !coreSrcS7.includes("players[99]") &&
+  !/players\s*\[\s*99\s*\]/.test(coreSrcS7));
+
+check("espionage tech and spy unit in tables",
+  api.TECHS.espionage && api.TECHS.espionage.req.length === 1 && api.TECHS.espionage.req[0] === "banking" &&
+  api.UNITS.spy.tech === "espionage" && api.UNITS.spy.cost === 70 && api.UNITS.spy.moves === 2 &&
+  api.UNITS.spy.atk === 0 && api.UNITS.spy.icon === "🕵" && api.UNITS.spy.upgrade === null);
+api.newGame(1);
+check("spy unit locked without espionage", api.unitAvailable(0, "spy") === false);
+api.S.players[0].techs.push("espionage");
+check("spy buildable with espionage", api.unitAvailable(0, "spy") === true);
+
+api.newGame(1);
+api.S.units = api.S.units.filter((u) => u.owner === 0);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+const spCity = api.S.cities[0];
+spCity.owner = 1;
+api.S.players[1].techs.push("writing", "pottery");
+const sp1 = api.spawn("spy", 0, spCity.x, spCity.y);
+let spR;
+Math.random = () => 0;
+try { spR = api.spyStealTech(sp1.id); } finally { Math.random = s7Random; }
+check("spy steals tech on success roll", spR.ok === true && spR.tech === "writing" &&
+  api.S.players[0].techs.includes("writing") && !api.S.units.includes(sp1) &&
+  api.S.log.some((l) => l.includes("выкрал технологию")));
+const sp2 = api.spawn("spy", 0, spCity.x, spCity.y);
+Math.random = () => 0.999;
+try { spR = api.spyStealTech(sp2.id); } finally { Math.random = s7Random; }
+check("spy dies on failed steal", spR.ok === false && spR.reason === "шпион пойман" &&
+  !api.S.units.includes(sp2) && !api.atWar(0, 1) &&
+  api.S.log.some((l) => l.includes("Шпион") && l.includes("пойман")));
+spCity.prodStored = 100;
+const sp3 = api.spawn("spy", 0, spCity.x, spCity.y);
+Math.random = () => 0;
+try { spR = api.spySabotage(sp3.id); } finally { Math.random = s7Random; }
+check("sabotage halves stored production", spR.ok === true && spCity.prodStored === 50 &&
+  !api.S.units.includes(sp3));
+api.spawn("spy", 1, spCity.x, spCity.y);
+const sp4 = api.spawn("spy", 0, spCity.x, spCity.y);
+Math.random = () => 0.31;
+try { spR = api.spyStealTech(sp4.id); } finally { Math.random = s7Random; }
+check("counterintelligence foils steal at 0.31", spR.ok === false && !api.S.units.includes(sp4));
+const sp5 = api.spawn("spy", 0, spCity.x, spCity.y);
+Math.random = () => 0.36;
+try { spR = api.spySabotage(sp5.id); } finally { Math.random = s7Random; }
+check("counterintelligence foils sabotage at 0.36", spR.ok === false && !api.S.units.includes(sp5));
+api.S.players[0].techs.push("pottery");
+const sp6 = api.spawn("spy", 0, spCity.x, spCity.y);
+spR = api.spyStealTech(sp6.id);
+check("nothing to steal keeps spy alive", spR.ok === false && spR.reason === "нечего красть" &&
+  api.S.units.includes(sp6));
+const spGuardX = spCity.x + 1 <= 25 ? spCity.x + 1 : spCity.x - 1;
+const spGuard = api.spawn("warrior", 1, spGuardX, spCity.y);
+const spAtt = api.spawn("spy", 0, spCity.x, spCity.y);
+spAtt.moves = 2;
+api.attack(spAtt, spGuard.x, spGuard.y);
+check("spy cannot attack", api.S.units.includes(spGuard) && api.S.units.includes(spAtt) &&
+  spAtt.moves === 2);
+
+check("sprint 7 wonders effects declared",
+  api.WONDERS.gardens.effects.foodFlat === 2 &&
+  api.WONDERS.artemis.effects.culture === 2 &&
+  api.WONDERS.terracotta.effects.freeUnits.id === "swordsman" &&
+  api.WONDERS.terracotta.effects.freeUnits.n === 3 &&
+  api.WONDERS.lighthouse.effects.tradeMult === 1.5 &&
+  ["gardens", "artemis", "terracotta", "lighthouse"].every((id) => api.TECHS[api.WONDERS[id].tech]));
+
+api.newGame(1);
+api.S.units = [];
+const gdSpots = cultSpots();
+api.foundCity(api.spawn("settler", 0, gdSpots[0][0], gdSpots[0][1]));
+api.foundCity(api.spawn("settler", 0, gdSpots[1][0], gdSpots[1][1]));
+api.foundCity(api.spawn("settler", 1, gdSpots[2][0], gdSpots[2][1]));
+for (const c of api.S.cities) { c.pop = 1; c.foodStored = 0; c.buildings = []; c.producing = null; c.religion = null; }
+api.S.players[0].stateReligion = null;
+api.S.players[1].stateReligion = null;
+const gdA = api.S.cities[0], gdB = api.S.cities[1], gdE = api.S.cities[2];
+const gdF0 = api.cityYields(gdA).food, gdFB0 = api.cityYields(gdB).food, gdFE0 = api.cityYields(gdE).food;
+api.S.players[0].techs.push("mathematics");
+gdA.producing = { k: "wonder", id: "gardens" };
+gdA.prodStored = 999;
+api.processEconomy();
+check("gardens +2 food in all owner cities",
+  api.cityYields(gdA).food === gdF0 + 2 && api.cityYields(gdB).food === gdFB0 + 2 &&
+  api.cityYields(gdE).food === gdFE0 && api.playerEffects(0).foodFlat === 2 &&
+  api.S.wonders.some((w) => w.id === "gardens"));
+
+api.newGame(1);
+api.S.units = [];
+const arSpots = cultSpots();
+api.foundCity(api.spawn("settler", 0, arSpots[0][0], arSpots[0][1]));
+api.foundCity(api.spawn("settler", 0, arSpots[1][0], arSpots[1][1]));
+api.foundCity(api.spawn("settler", 1, arSpots[2][0], arSpots[2][1]));
+for (const c of api.S.cities) { c.pop = 1; c.foodStored = 0; c.buildings = []; c.producing = null; c.religion = null; c.culture = 0; }
+api.S.players[0].stateReligion = null;
+api.S.players[1].stateReligion = null;
+const arA = api.S.cities[0], arB = api.S.cities[1], arE = api.S.cities[2];
+api.S.players[0].techs.push("construction");
+arA.producing = { k: "wonder", id: "artemis" };
+arA.prodStored = 999;
+api.processEconomy();
+check("artemis built", api.S.wonders.some((w) => w.id === "artemis") && api.playerEffects(0).culture === 2);
+for (const c of api.S.cities) c.culture = 0;
+api.processEconomy();
+check("artemis +2 culture growth in all owner cities",
+  arA.culture === 3 && arB.culture === 3 && arE.culture === 1);
+
+api.newGame(1);
+api.S.units = [];
+api.foundCity(api.spawn("settler", 0, cultSpots()[0][0], cultSpots()[0][1]));
+const tcCity = api.S.cities[0];
+tcCity.foodStored = 0;
+tcCity.buildings = [];
+api.S.players[0].techs.push("bureaucracy");
+const tcBefore = api.S.units.length;
+tcCity.producing = { k: "wonder", id: "terracotta" };
+tcCity.prodStored = 999;
+api.processEconomy();
+check("terracotta musters 3 free swordsmen",
+  api.S.units.filter((u) => u.owner === 0 && u.type === "swordsman" && u.x === tcCity.x && u.y === tcCity.y).length === 3 &&
+  api.S.units.length === tcBefore + 3 &&
+  api.S.wonders.some((w) => w.id === "terracotta"));
+
+api.newGame(1);
+api.S.units = [];
+const lhCoast = [];
+for (let i = 0; i < api.S.map.length; i++) {
+  const x = i % 26, y = (i / 26) | 0;
+  if (api.S.map[i] === 0) continue;
+  const w = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => {
+    const wx = x + dx, wy = y + dy;
+    return wx >= 0 && wy >= 0 && wx < 26 && wy < 18 && api.S.map[wy * 26 + wx] === 0;
+  });
+  if (w) lhCoast.push({ x, y, comp: api.S.waterComp[(y + w[1]) * 26 + (x + w[0])] });
+}
+let lhPair = null;
+for (let i = 0; i < lhCoast.length && !lhPair; i++)
+  for (let j = i + 1; j < lhCoast.length && !lhPair; j++) {
+    const a = lhCoast[i], b = lhCoast[j];
+    if (a.comp !== b.comp) continue;
+    if (Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= 3) continue;
+    lhPair = [a, b];
+  }
+if (lhPair) {
+  api.S.players[0].techs.push("sailing", "compass");
+  api.foundCity(api.spawn("settler", 0, lhPair[0].x, lhPair[0].y));
+  api.foundCity(api.spawn("settler", 0, lhPair[1].x, lhPair[1].y));
+  for (const c of api.S.cities) { c.pop = 1; c.foodStored = 0; c.buildings = []; c.producing = null; }
+  const lhA = api.S.cities[0];
+  const lhY0 = api.cityYields(lhA);
+  lhA.producing = { k: "wonder", id: "lighthouse" };
+  lhA.prodStored = 999;
+  api.processEconomy();
+  check("lighthouse lifts sea trade gold 2 to 3",
+    lhY0.trade === true && lhY0.tradeGold === 2 && api.cityYields(lhA).tradeGold === 3 &&
+    api.cityYields(api.S.cities[1]).tradeGold === 3 && api.playerEffects(0).tradeMult === 1.5 &&
+    api.S.wonders.some((w) => w.id === "lighthouse"));
+} else {
+  check("lighthouse lifts sea trade gold 2 to 3", false);
+}
+
+api.newGame(1);
+const rp = api.S.players[0];
+rp.techs.push("banking", "education");
+const rB = api.techAvailable(rp, "bureaucracy");
+rp.techs = ["astronomy"];
+const rC = api.techAvailable(rp, "compass");
+rp.techs = ["banking"];
+const rE = api.techAvailable(rp, "espionage");
+check("sprint 7 techs reachable", rB === true && rC === true && rE === true &&
+  api.TECHS.bureaucracy.cost === 200 && api.TECHS.compass.cost === 150);
+
+api.newGame(1, 1, 2);
+api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
+api.save();
+const rawS7 = JSON.parse(store["civ1_save"]);
+delete rawS7.camps;
+delete rawS7.humanOrder;
+delete rawS7.currentPlayer;
+rawS7.cities.forEach((c) => { delete c.sackedTurn; });
+store["civ1_save"] = JSON.stringify(rawS7);
+check("pre-S7 save migrates camps handoff and sack fields", api.load() === true &&
+  Array.isArray(api.S.camps) && api.S.camps.length === 0 &&
+  JSON.stringify(api.S.humanOrder) === "[0]" && api.S.currentPlayer === 0 &&
+  api.S.cities.every((c) => c.sackedTurn === -99));
+check("migration recomputes human flags",
+  api.S.players[0].isHuman === true && api.S.players[1].isHuman === false && api.S.players[2].isHuman === false);
+let s7Err = null;
+try { api.S.over = null; api.endTurn(); } catch (e) { s7Err = e; }
+check("migrated S7 save lives one turn", s7Err === null && api.S.turn === 2);
+
 if (!mutation) {
   const expectFail = {    a: "FAIL granary +2 food",
     b: "FAIL processEconomy updates borders after growth",
@@ -2641,8 +3030,10 @@ if (!mutation) {
     k: "FAIL diplomatic victory at 60 percent",
     l: "FAIL mapValue matches unknown cells",
     m: "FAIL democracy boosts science",
+    n: "FAIL barbarian spawn honors difficulty timer",
+    o: "FAIL spy steals tech on success roll",
   };
-  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"]) {
+  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"]) {
     let r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     if (r.status === null || r.error) {
       r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
@@ -2651,7 +3042,7 @@ if (!mutation) {
   }
 }
 
-check("suite within time budget", Date.now() - t0 < 45000);
+check("suite within time budget", Date.now() - t0 < 60000);
 
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
