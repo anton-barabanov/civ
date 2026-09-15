@@ -1,4 +1,5 @@
 export async function createRenderer3D(container, handlers) {
+  console.log("[civ] renderer3d v5 (fog-black)");
   const THREE = await import("./vendor/three.module.js");
   const models = await import("./models3d.js");
 
@@ -20,7 +21,7 @@ export async function createRenderer3D(container, handlers) {
   let mapH = 0;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0d0d12);
+  scene.background = new THREE.Color(0x000000);
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
