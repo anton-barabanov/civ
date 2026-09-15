@@ -113,7 +113,19 @@ function onTileClick(x, y) {
   const S = getState();
   if (S.over) { refresh(); return; }
   const cur = S.currentPlayer ?? 0;
-  if (!inMap(x, y) || !S.players[cur].explored[key(x, y)]) return;
+  if (!inMap(x, y)) return;
+  const expl = S.players[cur].explored[key(x, y)];
+  if (!expl) {
+    const selE = S.sel ? unitById(S.sel) : null;
+    if (selE && selE.owner === cur && reachable(selE).has(key(x, y))) {
+      moveUnit(selE, x, y);
+      sfx.move();
+      if (S.sel && !unitById(S.sel)) S.sel = null;
+      save();
+      refresh();
+    }
+    return;
+  }
   const sel = S.sel ? unitById(S.sel) : null;
   if (!(sel && sel.owner === cur && sel.type === "bomber" && sel.moves > 0)) bombMode = false;
   if (bombMode && sel && sel.owner === cur && sel.type === "bomber") {

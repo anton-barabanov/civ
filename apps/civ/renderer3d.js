@@ -159,6 +159,7 @@ export async function createRenderer3D(container, handlers) {
   function pick(e, cb) {
     const r = canvas.getBoundingClientRect();
     if (!r.width || !r.height) return;
+    if (camera.matrixWorldAutoUpdate) camera.updateMatrixWorld();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(pickMeshes, false);
@@ -307,8 +308,10 @@ export async function createRenderer3D(container, handlers) {
   const slabProtos = new Map();
   const tmpM = new THREE.Matrix4();
   const tmpC = new THREE.Color();
+  const SLAB_FOG = new THREE.Color(0.13, 0.13, 0.15);
   const SLAB_DIM = new THREE.Color(0.45, 0.45, 0.45);
   const SLAB_LIT = new THREE.Color(1, 1, 1);
+  const slabTint = (mode) => (mode === 2 ? SLAB_FOG : mode === 1 ? SLAB_DIM : SLAB_LIT);
 
   function slabProto(type) {
     let p = slabProtos.get(type);
@@ -366,7 +369,7 @@ export async function createRenderer3D(container, handlers) {
     st.mesh.count = st.count;
     tmpM.makeTranslation(tileX(t.x, vm), slabProto(type).y, tileZ(t.y, vm));
     st.mesh.setMatrixAt(id, tmpM);
-    st.mesh.setColorAt(id, dim ? SLAB_DIM : SLAB_LIT);
+    st.mesh.setColorAt(id, slabTint(dim));
     st.mesh.instanceMatrix.needsUpdate = true;
     if (st.mesh.instanceColor) st.mesh.instanceColor.needsUpdate = true;
     st.tileOf[id] = idx;
@@ -397,14 +400,13 @@ export async function createRenderer3D(container, handlers) {
     const st = slabStore(type);
     const id = st.instOf.get(idx);
     if (id === undefined) return;
-    st.mesh.setColorAt(id, dim ? SLAB_DIM : SLAB_LIT);
+    st.mesh.setColorAt(id, slabTint(dim));
     st.mesh.instanceColor.needsUpdate = true;
   }
 
   function syncTiles(vm) {
     const seen = new Set();
     for (const t of vm.tiles) {
-      if (!t.explored) continue;
       const idx = t.y * vm.W + t.x;
       seen.add(idx);
       let entry = tilesMap.get(idx);
@@ -422,17 +424,27 @@ export async function createRenderer3D(container, handlers) {
           if (forest && o.position.y > 0) o.castShadow = true;
           kids.push(o);
         });
+        if (!t.explored) {
+          g.visible = false;
+          for (const k of kids) k.visible = false;
+        }
         tileRoot.add(g);
-        entry = { group: g, kids, dimmed: null, resMesh: null, imprMesh: null, imprVal: null, ocean: t.terrain === 0, x: t.x, y: t.y, type: t.terrain };
+        entry = { group: g, kids, dimmed: null, explored: t.explored, resMesh: null, imprMesh: null, imprVal: null, ocean: t.terrain === 0, x: t.x, y: t.y, type: t.terrain };
         tilesMap.set(idx, entry);
-        slabAdd(vm, t.terrain, idx, t, !t.visible);
+        slabAdd(vm, t.terrain, idx, t, !t.explored ? 2 : (!t.visible ? 1 : 0));
         if (entry.ocean) oceanGroups.push(entry);
+      } else if (entry.explored !== t.explored) {
+        entry.explored = t.explored;
+        entry.group.visible = t.explored;
+        for (const k of entry.kids) k.visible = t.explored;
+        slabSetDim(entry.type, idx, !t.explored ? 2 : (!t.visible ? 1 : 0));
       }
+      if (!t.explored) continue;
       const dim = !t.visible;
       if (entry.dimmed !== dim) {
         entry.dimmed = dim;
         for (const k of entry.kids) k.material = dim ? dimOf(k.userData.baseMat) : k.userData.baseMat;
-        slabSetDim(entry.type, idx, dim);
+        slabSetDim(entry.type, idx, dim ? 1 : 0);
       }
       const wantRes = (entry.ocean && t.res && t.visible) ||
         (!entry.ocean && t.res && LAND_RES[t.res] && t.explored);
