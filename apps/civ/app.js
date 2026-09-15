@@ -138,7 +138,13 @@ function onTileClick(x, y) {
     return;
   }
   if (sel && sel.owner === cur) {
-    if (sel.x === x && sel.y === y) { S.sel = null; refresh(); return; }
+    if (sel.x === x && sel.y === y) {
+      const mine = unitsAt(x, y).filter((u) => u.owner === cur);
+      if (mine.length > 1) S.sel = nextInStack(mine, S.sel).id;
+      else S.sel = null;
+      refresh();
+      return;
+    }
     const reach = reachable(sel);
     if (reach.has(key(x, y))) {
       const enemies = unitsAt(x, y).some((u) => u.owner !== cur) ||

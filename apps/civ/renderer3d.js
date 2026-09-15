@@ -308,7 +308,7 @@ export async function createRenderer3D(container, handlers) {
   const slabProtos = new Map();
   const tmpM = new THREE.Matrix4();
   const tmpC = new THREE.Color();
-  const SLAB_FOG = new THREE.Color(0.13, 0.13, 0.15);
+  const SLAB_FOG = new THREE.Color(0.02, 0.02, 0.023);
   const SLAB_DIM = new THREE.Color(0.45, 0.45, 0.45);
   const SLAB_LIT = new THREE.Color(1, 1, 1);
   const slabTint = (mode) => (mode === 2 ? SLAB_FOG : mode === 1 ? SLAB_DIM : SLAB_LIT);
