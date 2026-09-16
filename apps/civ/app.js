@@ -80,6 +80,7 @@ function buildViewModel() {
         buildings: c.buildings.length,
         happy: c.happy ?? 1, unhappy: c.unhappy ?? 0, riot: !!c.riot,
         revolt: (c.revoltPressure || 0) >= 3,
+        colony: !!c.colony,
         wonders: (S.wonders || []).filter((w) => w.cityId === c.id).map((w) => w.id),
         prodRatio: c.producing && cost > 0 ? Math.min(1, (c.prodStored || 0) / cost) : null,
       };
@@ -711,6 +712,7 @@ function showCity(c) {
       <div class="civ-growth">Настроение: ${mood} · 😀 ${hap.happy} / 😡 ${hap.unhappy}</div>
       ${pressure > 0 ? `<div class="civ-warn">⚠ Давление ${escapeHtml(presser || "соседей")}: ${pressure}/5${held ? " · сдерживает гарнизон" : ""}</div>` : ""}
       ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeGold}🪙</div>` : ""}
+      ${c.colony ? `<div class="civ-yields">⚓ Колония${S.turn - c.colony <= 10 ? ` (${Math.max(0, 10 - (S.turn - c.colony))} ходов льготы)` : ""}</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
       ${curProd ? `<div class="civ-growth">Производит: ${curProd.name} (${c.prodStored}/${c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : curProd.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
       ${c.buildings.length ? `<div class="civ-yields">Постройки: ${c.buildings.map((b) => BUILDINGS[b].name).join(", ")}</div>` : ""}

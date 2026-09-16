@@ -820,6 +820,11 @@ function foundCity(u) {
     addLog("Нельзя основать город на чужой территории");
     return false;
   }
+  const comp = landCompOf(u.x, u.y);
+  const colony = S.cities.some((o) => o.owner === u.owner) &&
+    !S.cities.some((o) => o.owner === u.owner && comp.has(key(o.x, o.y)))
+    ? S.turn
+    : false;
   const name = (S.players[u.owner] && S.players[u.owner].cityNames.pop()) || `Город ${S.nextId}`;
   const c = {
     id: S.nextId++,
@@ -841,11 +846,19 @@ function foundCity(u) {
     revoltPressure: 0,
     flipCooldown: 0,
     revoltBy: null,
+    colony,
   };
   S.cities.push(c);
   S.units = S.units.filter((x) => x !== u);
   if (S.sel === u.id) S.sel = null;
   addLog(`${S.players[u.owner].name}: основан город ${name}`);
+  if (colony !== false) {
+    const guardId = ["musketman", "spearman", "archer", "warrior"].find((t) => unitAvailable(u.owner, t));
+    if (guardId) {
+      spawn(guardId, u.owner, c.x, c.y);
+      addLog(`Колония ${name}: ${UNITS[guardId].name} вступает в строй`);
+    }
+  }
   recomputeBorders();
   computeVision();
   return true;
@@ -1197,7 +1210,8 @@ function playerGoldPerTurn(i) {
   const cities = S.cities.filter((c) => c.owner === i);
   let income = 0;
   for (const c of cities) income += cityYields(c).gold;
-  const upkeep = cities.length * 2 + S.units.filter((u) => u.owner === i).length;
+  const upkeep = cities.filter((c) => !(!!c.colony && S.turn - c.colony <= 10)).length * 2 +
+    S.units.filter((u) => u.owner === i).length;
   return { income, upkeep, net: income - upkeep };
 }
 
@@ -1716,6 +1730,11 @@ function aiTurnOne(owner) {
       if (port) buyForGold(port.id, "unit", navalId);
     }
   }
+  const capCity = myCities.slice().sort((a, b) => a.id - b.id)[0];
+  const capHome = capCity ? landCompOf(capCity.x, capCity.y) : null;
+  const homeCitiesN = capHome
+    ? S.cities.filter((c) => c.owner === owner && capHome.has(key(c.x, c.y))).length
+    : 0;
   for (const c of S.cities.filter((x) => x.owner === owner)) {
     if (!c.producing) {
       const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
@@ -1734,7 +1753,7 @@ function aiTurnOne(owner) {
         c.producing = { k: "building", id: happyBld };
       } else if (c.pop >= 4 && availWonders.length && Math.random() < diff.wonderChance) {
         c.producing = { k: "wonder", id: availWonders[(Math.random() * availWonders.length) | 0] };
-      } else if (settlers === 0 && myCities < diff.maxCities && Math.random() < diff.settlerChance) {
+      } else if (settlers === 0 && homeCitiesN < diff.maxCities && Math.random() < diff.settlerChance) {
         c.producing = { k: "unit", id: "settler" };
       } else if (myCities >= 2 && myUnits.filter((u) => u.type === "worker").length < myCities && unitAvailable(owner, "worker")) {
         c.producing = { k: "unit", id: "worker" };
@@ -3018,6 +3037,7 @@ function load() {
       if (typeof c.flipCooldown !== "number") c.flipCooldown = 0;
       if (typeof c.revoltBy !== "number") c.revoltBy = null;
       if (typeof c.sackedTurn !== "number") c.sackedTurn = -99;
+      c.colony = c.colony ?? false;
     }
     S.players.forEach((p, i) => {
       p.isHuman = S.humanOrder.includes(i);
