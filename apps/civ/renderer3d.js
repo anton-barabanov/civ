@@ -405,7 +405,26 @@ export async function createRenderer3D(container, handlers) {
     st.mesh.instanceColor.needsUpdate = true;
   }
 
+  let mapSig = null;
+
+  function resetTiles() {
+    for (const entry of tilesMap.values()) tileRoot.remove(entry.group);
+    tilesMap.clear();
+    for (const st of slabStores.values()) {
+      if (st.mesh) { tileRoot.remove(st.mesh); st.mesh.dispose(); }
+    }
+    slabStores.clear();
+    oceanGroups.length = 0;
+    borderKey = null;
+  }
+
   function syncTiles(vm) {
+    let sig = vm.W + "x" + vm.H + ":";
+    for (const t of vm.tiles) sig += t.terrain;
+    if (sig !== mapSig) {
+      if (mapSig !== null) resetTiles();
+      mapSig = sig;
+    }
     const seen = new Set();
     for (const t of vm.tiles) {
       const idx = t.y * vm.W + t.x;
