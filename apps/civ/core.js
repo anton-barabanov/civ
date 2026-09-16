@@ -1719,6 +1719,7 @@ function aiTurnOne(owner) {
     : null;
   const military = () => myUnits.filter((u) => !UNITS[u.type].gp && UNITS[u.type].atk > 0)
     .sort((a, b) => UNITS[a.type].atk - UNITS[b.type].atk);
+  const allyWarPower = aiAllyClusterMap(owner);
   if (myCities.length) {
     const cap = myCities.length * 3 + 2;
     if (myUnits.length > cap) {
@@ -2143,7 +2144,8 @@ function aiTurnOne(owner) {
     for (const c of S.cities) {
       if (c.owner === owner || !atWar(owner, c.owner)) continue;
       const d = dist(u.x, u.y, c.x, c.y);
-      if (d < bestD && d <= diff.aggroRange) { bestD = d; target = [c.x, c.y]; }
+      const sc = d - (allyWarPower.get(c.id) || 0);
+      if (sc < bestD && d <= diff.aggroRange) { bestD = sc; target = [c.x, c.y]; }
     }
     if (!target) {
       let bd = Infinity;
@@ -2159,7 +2161,8 @@ function aiTurnOne(owner) {
       for (const c of S.cities) {
         if (c.owner === owner || !atWar(owner, c.owner)) continue;
         const d = dist(u.x, u.y, c.x, c.y);
-        if (d < bd) { bd = d; target = [c.x, c.y]; }
+        const sc = d - (allyWarPower.get(c.id) || 0);
+        if (sc < bd) { bd = sc; target = [c.x, c.y]; }
       }
     }
     if (target) {
@@ -2295,6 +2298,22 @@ function landCompOf(x, y) {
     }
   }
   return seen;
+}
+
+function aiAllyClusterMap(owner) {
+  const res = new Map();
+  const allies = S.units.filter((o) => isAlly(owner, o.owner));
+  if (!allies.length) return res;
+  for (const c of S.cities) {
+    if (c.owner === owner || !atWar(owner, c.owner)) continue;
+    let pw = 0;
+    for (const o of allies) {
+      if (!atWar(o.owner, c.owner)) continue;
+      if (dist(o.x, o.y, c.x, c.y) <= 3) pw += UNITS[o.type].atk;
+    }
+    if (pw > 0) res.set(c.id, Math.min(pw, 9));
+  }
+  return res;
 }
 
 function aiRoadCells(owner) {
@@ -3161,6 +3180,7 @@ export function debugApi() {
     aiDiplomacy,
     aiNavyPlan,
     aiLandingTile,
+    aiAllyClusterMap,
     landCompOf,
     waterCompOf,
     isCoastal,

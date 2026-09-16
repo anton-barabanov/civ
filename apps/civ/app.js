@@ -707,12 +707,12 @@ function showCity(c) {
   m.id = "civ-modal";
   m.innerHTML = `
     <div class="civ-dialog civ-city">
-      <h2>🏛 ${c.name} <span class="civ-pop">население ${c.pop}</span></h2>
+      <h2>🏛 ${c.name}${c.colony ? ` <span class="civ-pop">⚓ колония</span>` : ""} <span class="civ-pop">население ${c.pop}</span></h2>
       <div class="civ-yields">🌾 ${y.food} (еда) · 🔨 ${y.prod} (произв.) · 🔬 ${y.sci} (наука) · 🪙 ${y.gold} (золото)</div>
       <div class="civ-growth">Настроение: ${mood} · 😀 ${hap.happy} / 😡 ${hap.unhappy}</div>
       ${pressure > 0 ? `<div class="civ-warn">⚠ Давление ${escapeHtml(presser || "соседей")}: ${pressure}/5${held ? " · сдерживает гарнизон" : ""}</div>` : ""}
       ${y.trade ? `<div class="civ-yields">🤝 Морская торговля: +${y.tradeGold}🪙</div>` : ""}
-      ${c.colony ? `<div class="civ-yields">⚓ Колония${S.turn - c.colony <= 10 ? ` (${Math.max(0, 10 - (S.turn - c.colony))} ходов льготы)` : ""}</div>` : ""}
+      ${c.colony ? `<div class="civ-yields">⚓ Колония: без содержания ещё ${Math.max(0, 10 - (S.turn - c.colony))} ходов; защитник получен при основании</div>` : ""}
       <div class="civ-growth">Рост: ${c.foodStored}/${10 + c.pop * 5} еды</div>
       ${curProd ? `<div class="civ-growth">Производит: ${curProd.name} (${c.prodStored}/${c.producing.k === "wonder" ? wonderCost(c, c.producing.id) : curProd.cost})</div>` : `<div class="civ-warn">Не выбрано производство!</div>`}
       ${c.buildings.length ? `<div class="civ-yields">Постройки: ${c.buildings.map((b) => BUILDINGS[b].name).join(", ")}</div>` : ""}

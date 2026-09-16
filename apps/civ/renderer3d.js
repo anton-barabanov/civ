@@ -522,6 +522,10 @@ export async function createRenderer3D(container, handlers) {
   const prodBarFillGeo = ownGeo(new THREE.BoxGeometry(0.5, 0.025, 0.05).translate(0.25, 0, 0));
   const prodBarBgMat = ownMat(new THREE.MeshBasicMaterial({ color: 0x14141a }));
   const prodBarFillMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffe14d }));
+  const colPoleGeo = ownGeo(new THREE.CylinderGeometry(0.011, 0.011, 0.3, 5));
+  const colFlagGeo = ownGeo(new THREE.BoxGeometry(0.11, 0.065, 0.012));
+  const colPoleMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xf4f6f8 }));
+  const colFlagMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffe14d }));
   const fxRoot = new THREE.Group();
   overlayRoot.add(fxRoot);
 
@@ -574,6 +578,11 @@ export async function createRenderer3D(container, handlers) {
       const i = per.get(k) || 0;
       per.set(k, i + 1);
       const water = vm.tiles[k].terrain === 0;
+      if (!water && !u.air && u.type !== "galley" && u.type !== "caravel") {
+        const p = prevUnits.get(u.id);
+        const pt = p ? vm.tiles[p.y * vm.W + p.x] : null;
+        if (pt && pt.terrain === 0) spawnRing(tileX(u.x, vm), tileZ(u.y, vm), 0x4da3ff, FX_RING);
+      }
       const px = tileX(u.x, vm) + i * 0.22;
       const pz = tileZ(u.y, vm) + i * 0.22;
       if (e.lastX !== px || e.lastZ !== pz) {
@@ -628,7 +637,7 @@ export async function createRenderer3D(container, handlers) {
       if (!e) {
         const holder = new THREE.Group();
         overlayRoot.add(holder);
-        e = { holder, mesh: null, pop: -1, walls: null, owner: -1, religion: null, relMesh: null, wonder: null, wMesh: null, flag: null, flagPhase: c.id % 7, spawnT: 0, buildT: 1, pulseT: 1, buildings: -1, wonderCount: -1, prodRatio: null };
+        e = { holder, mesh: null, pop: -1, walls: null, owner: -1, religion: null, relMesh: null, wonder: null, wMesh: null, flag: null, flagPhase: c.id % 7, spawnT: 0, buildT: 1, pulseT: 1, buildings: -1, wonderCount: -1, prodRatio: null, colony: null, colMesh: null, colFlag: null, colT: 1 };
         cityHolders.set(c.id, e);
       }
       const walls = !!c.walls;
@@ -672,6 +681,27 @@ export async function createRenderer3D(container, handlers) {
           e.holder.add(e.relMesh);
         }
         e.religion = rel;
+      }
+      const colony = !!c.colony;
+      if (e.colony !== colony) {
+        e.colony = colony;
+        if (e.colMesh) e.holder.remove(e.colMesh);
+        e.colMesh = null;
+        e.colFlag = null;
+        if (colony) {
+          const cm = new THREE.Group();
+          const pole = new THREE.Mesh(colPoleGeo, colPoleMat);
+          pole.position.y = 0.15;
+          cm.add(pole);
+          const cf = new THREE.Mesh(colFlagGeo, colFlagMat);
+          cf.position.set(0.055, 0.265, 0);
+          cm.add(cf);
+          cm.position.set(0.26, 0.62, 0.26);
+          e.holder.add(cm);
+          e.colMesh = cm;
+          e.colFlag = cf;
+          e.colT = 0;
+        }
       }
       if (!e.barBg) {
         e.barBg = new THREE.Mesh(prodBarBgGeo, prodBarBgMat);
@@ -869,6 +899,11 @@ export async function createRenderer3D(container, handlers) {
       }
       if (e.prodRatio !== null) e.barFill.scale.x = Math.max(0.02, e.prodRatio) * (1 + 0.06 * Math.sin(t * 3 + id));
       if (e.flag) e.flag.rotation.y = 0.15 * Math.sin(t * 2 + e.flagPhase);
+      if (e.colMesh && e.colT < 0.3) {
+        e.colT += dt;
+        e.colMesh.scale.setScalar(e.colT < 0.3 ? 0.05 + 0.95 * (e.colT / 0.3) : 1);
+      }
+      if (e.colFlag) e.colFlag.rotation.y = 0.15 * Math.sin(t * 2 + e.flagPhase + 1.7);
     }
     for (const e of unitHolders.values()) {
       if (!e.kick) continue;

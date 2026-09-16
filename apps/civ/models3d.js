@@ -329,6 +329,20 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     add(group, geo("u:genPole", () => new THREE.CylinderGeometry(0.011, 0.011, 0.62, 5)), woodDark, -0.2, 0.31, 0.02);
     add(group, geo("u:genFlag", () => new THREE.BoxGeometry(0.16, 0.1, 0.012)), om, -0.11, 0.55, 0.02);
     add(group, geo("u:genFinial", () => new THREE.SphereGeometry(0.02, 6, 5)), mat(C.gold), -0.2, 0.63, 0.02);
+  } else if (unitType === "gp_merchant") {
+    addSage(group, om);
+    add(group, geo("u:merBag", () => new THREE.SphereGeometry(0.085, 7, 6)), mat(C.gold), -0.16, 0.07, 0.1).scale.set(1, 0.85, 1);
+    add(group, geo("u:merTie", () => new THREE.CylinderGeometry(0.02, 0.034, 0.03, 6)), mat(C.woodDark), -0.16, 0.145, 0.1);
+    const coinGeo = geo("u:merCoin", () => new THREE.CylinderGeometry(0.045, 0.045, 0.012, 8));
+    const coinMat = mat(C.gold);
+    add(group, coinGeo, coinMat, 0.15, 0.006, 0.13);
+    add(group, coinGeo, coinMat, 0.156, 0.018, 0.129);
+    add(group, coinGeo, coinMat, 0.148, 0.03, 0.134);
+    add(group, geo("u:merBeam", () => new THREE.BoxGeometry(0.22, 0.014, 0.014)), woodDark, 0.16, 0.36, 0.05);
+    add(group, geo("u:merRing", () => new THREE.TorusGeometry(0.045, 0.008, 6, 12)), metal, 0.16, 0.31, 0.05).rotation.y = Math.PI / 2;
+    const panGeo = geo("u:merPan", () => new THREE.ConeGeometry(0.032, 0.016, 8));
+    add(group, panGeo, mat(C.gold), 0.06, 0.335, 0.05).rotation.x = Math.PI;
+    add(group, panGeo, mat(C.gold), 0.26, 0.335, 0.05).rotation.x = Math.PI;
   } else if (unitType === "galley") {
     add(group, geo("u:hullG", () => new THREE.BoxGeometry(0.56, 0.1, 0.2)), wood, 0, 0.08, 0);
     add(group, geo("u:bowG", () => new THREE.ConeGeometry(0.09, 0.16, 4)), wood, 0.35, 0.08, 0).rotation.z = -Math.PI / 2;
