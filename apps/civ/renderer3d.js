@@ -493,6 +493,7 @@ export async function createRenderer3D(container, handlers) {
     readyRing: ownGeo(new THREE.TorusGeometry(0.3, 0.012, 6, 24)),
   };
   const selMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffe14d, side: THREE.DoubleSide }));
+  const hoverMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xd0bcff, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }));
   const dotMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 }));
   const readyMat = ownMat(new THREE.MeshBasicMaterial({ color: 0xffe14d }));
 
@@ -685,6 +686,14 @@ export async function createRenderer3D(container, handlers) {
       s.rotation.x = -Math.PI / 2;
       s.position.set(tileX(vm.selected.x, vm), 0.055, tileZ(vm.selected.y, vm));
       fxRoot.add(s);
+    }
+    if (vm.hovered && vm.hovered.x !== (vm.selected && vm.selected.x) || vm.hovered && vm.hovered.y !== (vm.selected && vm.selected.y)) {
+      if (vm.hovered) {
+        const h = new THREE.Mesh(G.selRing, hoverMat);
+        h.rotation.x = -Math.PI / 2;
+        h.position.set(tileX(vm.hovered.x, vm), 0.045, tileZ(vm.hovered.y, vm));
+        fxRoot.add(h);
+      }
     }
   }
 

@@ -91,6 +91,7 @@ function buildViewModel() {
   players[BARB_ID] = { color: BARB_COLOR, name: BARB_NAME };
   return {
     W,
+    hovered: hoveredTile,
     H,
     currentPlayer: cur,
     players,
@@ -106,6 +107,7 @@ function buildViewModel() {
 }
 
 let bombMode = false;
+let hoveredTile = null;
 let lastTechCounts = null;
 let lastOver = false;
 
@@ -454,10 +456,16 @@ let lastTipKey = "";
 
 function onTileHover(x, y) {
   const tip = document.getElementById("civ-tiletip");
-  if (!tip) return;
   const S = getState();
   const cur = S.currentPlayer ?? 0;
-  if (!inMap(x, y) || !S.players[cur].explored[key(x, y)]) {
+  const hov = inMap(x, y) ? { x, y } : null;
+  if (!hov || !S.players[cur].explored[key(x, y)]) {
+    if (hoveredTile || !hov) {
+      const changed = JSON.stringify(hoveredTile) !== JSON.stringify(hov);
+      hoveredTile = hov;
+      if (changed) refresh();
+    }
+    if (!tip) return;
     tip.classList.remove("show");
     lastTipKey = "";
     return;
@@ -465,6 +473,10 @@ function onTileHover(x, y) {
   const k = key(x, y);
   const vis = getVisible();
   const units = unitsAt(x, y).filter((u) => u.owner === cur || vis[k]);
+  if (JSON.stringify(hoveredTile) !== JSON.stringify({ x, y })) {
+    hoveredTile = { x, y };
+    refresh();
+  }
   const tk = `${x}:${y}:${S.turn}:${units.map((u) => u.id + ":" + u.moves).join(",")}`;
   if (tk === lastTipKey) return;
   lastTipKey = tk;
@@ -473,7 +485,7 @@ function onTileHover(x, y) {
   const res = S.res ? S.res[k] : null;
   const impr = S.impr ? S.impr[k] : null;
   const city = cityAt(x, y);
-  let html = `<b>${t.name}</b>${t.def ? ` · защита +${t.def}%` : ""}`;
+  let html = `<b>[${x},${y}] ${t.name}</b>${t.def ? ` · защита +${t.def}%` : ""}`;
   if (owner >= 0) html += `<div><i class="civ-dot" style="background:${S.players[owner].color}"></i> ${escapeHtml(S.players[owner].name)}</div>`;
   if (res) html += `<div>${RESOURCES[res].icon} ${RESOURCES[res].name}</div>`;
   if (impr) html += `<div>${impr.kind === "farm" ? "🌾" : impr.kind === "mine" ? "◆" : "🛤"} ${impr.left ? `строится: ${impr.left}` : ""}</div>`;
