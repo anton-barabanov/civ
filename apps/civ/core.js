@@ -1654,6 +1654,7 @@ function aiTurn() {
 function aiTurnOne(owner) {
   const p = S.players[owner];
   const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  const navyPlan = aiNavyPlan(owner);
   if (p.anarchy === 0) {
     const govCities = S.cities.filter((c) => c.owner === owner);
     if (p.government !== "monarchy" && p.government !== "democracy" && p.techs.includes("monarchy") &&
@@ -1705,6 +1706,16 @@ function aiTurnOne(owner) {
       if (upgradeUnit(u).ok) break;
     }
   }
+  if (navyPlan && !navyPlan.ship && navyPlan.mode === "war" &&
+    !S.units.some((x) => x.owner === owner && isNaval(x)) &&
+    !S.cities.some((ct) => ct.owner === owner && ct.producing && ct.producing.k === "unit" && UNITS[ct.producing.id] && UNITS[ct.producing.id].naval)) {
+    const navalId = p.techs.includes("astronomy") ? "caravel" : "galley";
+    const navalPrice = Math.ceil(UNITS[navalId].cost * 3);
+    if (unitAvailable(owner, navalId) && p.gold >= navalPrice + 20) {
+      const port = S.cities.filter((ct) => ct.owner === owner && isCoastal(ct.x, ct.y)).sort((a, b) => a.id - b.id)[0];
+      if (port) buyForGold(port.id, "unit", navalId);
+    }
+  }
   for (const c of S.cities.filter((x) => x.owner === owner)) {
     if (!c.producing) {
       const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
@@ -1727,6 +1738,11 @@ function aiTurnOne(owner) {
         c.producing = { k: "unit", id: "settler" };
       } else if (myCities >= 2 && myUnits.filter((u) => u.type === "worker").length < myCities && unitAvailable(owner, "worker")) {
         c.producing = { k: "unit", id: "worker" };
+      } else if (navyPlan && !navyPlan.ship && isCoastal(c.x, c.y) &&
+        !S.units.some((x) => x.owner === owner && isNaval(x)) &&
+        !S.cities.some((ct) => ct.owner === owner && ct.producing && ct.producing.k === "unit" && UNITS[ct.producing.id] && UNITS[ct.producing.id].naval) &&
+        unitAvailable(owner, p.techs.includes("astronomy") ? "caravel" : "galley")) {
+        c.producing = { k: "unit", id: p.techs.includes("astronomy") ? "caravel" : "galley" };
       } else if (aiRel && unitAvailable(owner, "missionary") && c.religion &&
         !myUnits.some((u) => u.type === "missionary") &&
         S.cities.some((o) => o.owner !== owner && !atWar(owner, o.owner) && o.religion !== aiRel && dist(c.x, c.y, o.x, o.y) <= 6)) {
@@ -1784,6 +1800,38 @@ function aiTurnOne(owner) {
   }
   for (const u of [...S.units]) {
     if (u.owner !== owner || !S.units.includes(u)) continue;
+    if (isNaval(u)) {
+      if (navyPlan && navyPlan.ship === u) {
+        const cap = UNITS[u.type].capacity || 0;
+        const aboard = cargoCount(u.x, u.y);
+        const hasSettler = unitsAt(u.x, u.y).some((o) => o.type === "settler");
+        const incoming = navyPlan.cargoIds.some((id) => { const cu = unitById(id); return cu && (cu.x !== u.x || cu.y !== u.y); });
+        const dLand = dist(u.x, u.y, navyPlan.landing[0], navyPlan.landing[1]);
+        const dRally = dist(u.x, u.y, navyPlan.rally[0], navyPlan.rally[1]);
+        const enroute = dLand < dRally;
+        const go = navyPlan.mode === "colony"
+          ? hasSettler && (!incoming || enroute)
+          : aboard >= Math.min(2, cap) || !incoming;
+        const dest = go ? navyPlan.landing : navyPlan.rally;
+        const dd = dist(u.x, u.y, dest[0], dest[1]);
+        if (dd > 0) {
+          const r = reachable(u);
+          let best = null;
+          let bd = dd;
+          for (const [k] of r) {
+            const x = k % W, y = (k / W) | 0;
+            const d = dist(x, y, dest[0], dest[1]);
+            if (d >= bd) continue;
+            if (unitsAt(x, y).some((o) => o.owner !== u.owner)) continue;
+            bd = d;
+            best = [x, y];
+          }
+          if (best) { moveUnit(u, best[0], best[1]); continue; }
+        }
+      }
+      u.moves = 0;
+      continue;
+    }
     if (isAir(u)) {
       if (u.type === "zeppelin") {
         let tgt = null;
@@ -1963,6 +2011,15 @@ function aiTurnOne(owner) {
       continue;
     }
     if (u.type === "settler") {
+      if (navyPlan && navyPlan.mode === "colony" && S.map[key(u.x, u.y)] === TILE.OCEAN) {
+        if (dist(u.x, u.y, navyPlan.goal[0], navyPlan.goal[1]) <= 2) {
+          stepToward(u, navyPlan.goal[0], navyPlan.goal[1]);
+          if (u.x === navyPlan.goal[0] && u.y === navyPlan.goal[1]) foundCity(u);
+        } else {
+          u.moves = 0;
+        }
+        continue;
+      }
       const home = landCompOf(u.x, u.y);
       let spot = null;
       let bestSc = -1;
@@ -1978,10 +2035,40 @@ function aiTurnOne(owner) {
           const sc = landScore(x, y) + landScore(x, y) - dist(u.x, u.y, x, y);
           if (sc > bestSc) { bestSc = sc; spot = [x, y]; }
         }
-      if (!spot) { u.moves = 0; continue; }
+      if (!spot) {
+        if (navyPlan && navyPlan.mode === "colony" && navyPlan.ship) {
+          const ship = navyPlan.ship;
+          while (u.moves > 0 && (u.x !== ship.x || u.y !== ship.y)) {
+            const before = u.x + "," + u.y;
+            stepToward(u, ship.x, ship.y);
+            if (u.x + "," + u.y === before) break;
+          }
+          continue;
+        }
+        u.moves = 0; continue;
+      }
       if (u.x === spot[0] && u.y === spot[1]) { foundCity(u); continue; }
       stepToward(u, spot[0], spot[1]);
       if (u.x === spot[0] && u.y === spot[1]) foundCity(u);
+      continue;
+    }
+    if (navyPlan && navyPlan.cargoIds.includes(u.id)) {
+      const ship = navyPlan.ship;
+      if (S.map[key(u.x, u.y)] === TILE.OCEAN) {
+        if (dist(u.x, u.y, navyPlan.goal[0], navyPlan.goal[1]) <= 2) {
+          const before = u.x + "," + u.y;
+          stepToward(u, navyPlan.goal[0], navyPlan.goal[1]);
+          if (u.x + "," + u.y !== before) u.moves = 0;
+        } else {
+          u.moves = 0;
+        }
+      } else {
+        while (u.moves > 0 && (u.x !== ship.x || u.y !== ship.y)) {
+          const before = u.x + "," + u.y;
+          stepToward(u, ship.x, ship.y);
+          if (u.x + "," + u.y === before) break;
+        }
+      }
       continue;
     }
     let target = null;
@@ -2196,6 +2283,135 @@ function aiRoadCells(owner) {
   if (meet === -1) return cells;
   for (let k = meet; k !== -1; k = par.get(k)) if (!S.impr[k]) cells.add(k);
   return cells;
+}
+
+function waterCompOf(x, y) {
+  return S.waterComp ? S.waterComp[key(x, y)] : -1;
+}
+
+function aiLandingNear(gx, gy, refX, refY) {
+  const wc = waterCompOf(refX, refY);
+  let best = null;
+  let bd = Infinity;
+  for (const [nx, ny] of neighbors(gx, gy)) {
+    if (S.map[key(nx, ny)] !== TILE.OCEAN || waterCompOf(nx, ny) !== wc) continue;
+    const d = dist(nx, ny, refX, refY);
+    if (d < bd) { bd = d; best = [nx, ny]; }
+  }
+  return best;
+}
+
+function aiLandingTile(owner, gx, gy) {
+  const ship = S.units.find((u) => u.owner === owner && isNaval(u));
+  let ref = ship ? [ship.x, ship.y] : null;
+  if (!ref) {
+    const c = S.cities.filter((ct) => ct.owner === owner && isCoastal(ct.x, ct.y)).sort((a, b) => a.id - b.id)[0];
+    ref = c ? adjWater(c.x, c.y) : null;
+  }
+  return ref ? aiLandingNear(gx, gy, ref[0], ref[1]) : null;
+}
+
+function aiNavyPlan(owner) {
+  const p = S.players[owner];
+  const diff = DIFFICULTIES[S.difficulty] || DIFFICULTIES[1];
+  const myCities = S.cities.filter((c) => c.owner === owner);
+  const coastal = myCities.filter((c) => isCoastal(c.x, c.y));
+  if (!coastal.length || !p.techs.includes("sailing")) return null;
+  const home = myCities.slice().sort((a, b) => b.pop - a.pop || a.id - b.id)[0];
+  const homeLand = landCompOf(home.x, home.y);
+  let mode = null;
+  let goal = null;
+  const foes = [];
+  for (let j = 0; j < S.players.length; j++) {
+    if (j === owner || !atWar(owner, j) || !playerAlive(j)) continue;
+    const ec = S.cities.filter((c) => c.owner === j);
+    if (!ec.length || ec.some((c) => homeLand.has(key(c.x, c.y)))) continue;
+    if (strengthOf(owner) > strengthOf(j)) foes.push(j);
+  }
+  if (foes.length) {
+    let best = null;
+    let bw = Infinity;
+    for (const c of S.cities) {
+      if (!foes.includes(c.owner) || homeLand.has(key(c.x, c.y)) || !isCoastal(c.x, c.y)) continue;
+      const w = c.pop + unitsAt(c.x, c.y).filter((x) => x.owner === c.owner).length + (c.buildings.includes("walls") ? 1 : 0);
+      if (w < bw || (w === bw && best && c.id < best.id)) { bw = w; best = c; }
+    }
+    if (best) { mode = "war"; goal = [best.x, best.y]; }
+  }
+  if (!mode && myCities.length < diff.maxCities) {
+    let full = true;
+    for (let i = 0; i < W * H; i++) {
+      if (!homeLand.has(i) || !TERRAIN[S.map[i]].passable) continue;
+      const x = i % W, y = (i / W) | 0;
+      if (cityAt(x, y)) continue;
+      const to = S.tileOwner[i];
+      if (to !== -1 && to !== owner) continue;
+      if (S.cities.some((c) => dist(c.x, c.y, x, y) < 3)) continue;
+      full = false;
+      break;
+    }
+    if (full) {
+      let best = null;
+      let bs = -1;
+      for (let i = 0; i < W * H; i++) {
+        if (homeLand.has(i) || !TERRAIN[S.map[i]].passable) continue;
+        const x = i % W, y = (i / W) | 0;
+        if (cityAt(x, y) || !isCoastal(x, y)) continue;
+        const to = S.tileOwner[i];
+        if (to !== -1 && to !== owner) continue;
+        if (S.cities.some((c) => dist(c.x, c.y, x, y) < 3)) continue;
+        const sc = 2 * landScore(x, y);
+        if (sc > bs) { bs = sc; best = [x, y]; }
+      }
+      if (best) { mode = "colony"; goal = best; }
+    }
+  }
+  if (!mode) return null;
+  let rc = null;
+  let rd = Infinity;
+  for (const c of coastal) {
+    const d = dist(c.x, c.y, goal[0], goal[1]);
+    if (d < rd || (d === rd && rc && c.id < rc.id)) { rd = d; rc = c; }
+  }
+  let rally = null;
+  let rwd = Infinity;
+  for (const [nx, ny] of neighbors(rc.x, rc.y)) {
+    if (S.map[key(nx, ny)] !== TILE.OCEAN) continue;
+    const d = dist(nx, ny, goal[0], goal[1]);
+    if (d < rwd) { rwd = d; rally = [nx, ny]; }
+  }
+  const ship = S.units.find((u) => u.owner === owner && isNaval(u)) || null;
+  const ref = ship ? [ship.x, ship.y] : rally;
+  const landing = aiLandingNear(goal[0], goal[1], ref[0], ref[1]);
+  if (!landing) return null;
+  const rallyLand = landCompOf(rc.x, rc.y);
+  const threatNear = (x, y) =>
+    S.units.some((e) => e.owner !== owner && (e.owner === BARB_ID || atWar(owner, e.owner)) && dist(e.x, e.y, x, y) <= diff.aggroRange) ||
+    S.cities.some((ct) => ct.owner !== owner && atWar(owner, ct.owner) && dist(ct.x, ct.y, x, y) <= diff.aggroRange);
+  const pool = S.units.filter((o) =>
+    o.owner === owner && !isNaval(o) && !isAir(o) && !UNITS[o.type].gp &&
+    (!ship || o.x !== ship.x || o.y !== ship.y) &&
+    dist(o.x, o.y, rally[0], rally[1]) <= 6 && rallyLand.has(key(o.x, o.y)) && !threatNear(o.x, o.y));
+  const mil = pool.filter((o) => UNITS[o.type].atk > 0).sort((a, b) => UNITS[b.type].atk - UNITS[a.type].atk || a.id - b.id);
+  const setts = pool.filter((o) => o.type === "settler").sort((a, b) => dist(a.x, a.y, rally[0], rally[1]) - dist(b.x, b.y, rally[0], rally[1]) || a.id - b.id);
+  if (mode === "war" && !ship && !mil.length) return null;
+  const cargoIds = [];
+  if (ship) {
+    const cap = UNITS[ship.type].capacity || 0;
+    for (const o of unitsAt(ship.x, ship.y).filter((o) => !isNaval(o) && !isAir(o))) cargoIds.push(o.id);
+    if (mode === "war") {
+      for (const o of mil) {
+        if (cargoIds.length >= Math.min(2, cap)) break;
+        cargoIds.push(o.id);
+      }
+      if (!cargoIds.length) return null;
+    } else {
+      if (!cargoIds.some((id) => { const cu = unitById(id); return cu && cu.type === "settler"; }) && setts.length && cargoIds.length < cap)
+        cargoIds.push(setts[0].id);
+      if (cargoIds.length < cap && mil.length) cargoIds.push(mil[0].id);
+    }
+  }
+  return { ship, mode, landing, goal, rally, cargoIds };
 }
 
 function stepToward(u, tx, ty) {
@@ -2844,6 +3060,7 @@ export {
   isAlly, proposeAlliance, breakAlliance,
   offerDeal, dealValue, mapValue, demandTribute, processDeals, barbarianTurn, placeCamps, clearCamp,
   unitAvailable, resourceConnected, resourceOwned, hasMarble, wonderCost, startImprovement, cancelWork,
+  aiNavyPlan, aiLandingTile, landCompOf, waterCompOf,
 };
 
 export function debugApi() {
@@ -2879,6 +3096,12 @@ export function debugApi() {
     placeCamps,
     clearCamp,
     aiDiplomacy,
+    aiNavyPlan,
+    aiLandingTile,
+    landCompOf,
+    waterCompOf,
+    isCoastal,
+    adjWater,
     relKey,
     atWar,
     declareWar,
