@@ -772,7 +772,7 @@ function showCity(c) {
       if (b.dataset.k === "unit" && b.dataset.id === "missionary" && !c.religion) return;
       c.producing = { k: b.dataset.k, id: b.dataset.id };
       save();
-      showCity(c);
+      closeModal();
       refresh();
     };
   });
@@ -812,7 +812,7 @@ function showTech() {
       if (!techAvailable(p, id)) return;
       if (p.researching !== id) { p.researching = id; p.progress = 0; }
       save();
-      showTech();
+      closeModal();
       refresh();
     };
   });
