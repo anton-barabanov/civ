@@ -35,6 +35,7 @@ const UNITS = {
   gp_artist: { name: "Художник", letter: "Х", icon: "🎨", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "artist" },
   gp_prophet: { name: "Пророк", letter: "П", icon: "🙏", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "prophet" },
   gp_general: { name: "Полководец", letter: "Пк", icon: "🎖️", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "general" },
+  gp_merchant: { name: "Торговец", letter: "Тр", icon: "💰", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "merchant" },
   spy: { name: "Шпион", letter: "Шп", icon: "🕵", atk: 0, def: 1, moves: 2, cost: 70, tech: "espionage", upgrade: null },
 };
 
@@ -153,10 +154,12 @@ const GREAT_PEOPLE = {
   artist: { name: "Художник", icon: "🎨", desc: "+100 культуры в город" },
   prophet: { name: "Пророк", icon: "🙏", desc: "Основать религию или +50 золота" },
   general: { name: "Полководец", icon: "🎖️", desc: "Собрать войско: +1 атаки всем своим юнитам в радиусе 2" },
+  merchant: { name: "Торговец", icon: "💰", desc: "Торговая миссия в чужом городе: золото" },
 };
 
-const GP_ORDER = ["scientist", "engineer", "artist", "prophet", "general"];
+const GP_ORDER = ["scientist", "engineer", "artist", "prophet", "general", "merchant"];
 const GP_BASE_THRESHOLD = 30;
+const MERCHANT_BASE = 100;
 
 const REL_SPREAD_RADIUS = 3;
 const REL_SPREAD_THRESHOLD = 5;
@@ -1582,7 +1585,7 @@ function useGreatPerson(unitId) {
   if (!def.gp) return { ok: false, reason: "не великий человек" };
   const p = S.players[u.owner];
   const c = cityAt(u.x, u.y);
-  if (def.gp !== "scientist" && def.gp !== "general" && (!c || c.owner !== u.owner))
+  if (def.gp !== "scientist" && def.gp !== "general" && def.gp !== "merchant" && (!c || c.owner !== u.owner))
     return { ok: false, reason: "должен быть в своём городе" };
   if (def.gp === "scientist") {
     const t = grantFreeTech(p);
@@ -1603,6 +1606,27 @@ function useGreatPerson(unitId) {
       p.gold += 50;
       addLog(`${GREAT_PEOPLE.prophet.name} приносит 50🪙`);
     }
+  } else if (def.gp === "merchant") {
+    if (c && c.owner === u.owner) return { ok: false, reason: "торговая миссия проводится в чужом городе" };
+    let t = c;
+    if (!t) {
+      let hostile = null;
+      for (const [nx, ny] of neighbors(u.x, u.y)) {
+        const nc = cityAt(nx, ny);
+        if (!nc || nc.owner === u.owner) continue;
+        if (atWar(u.owner, nc.owner)) {
+          if (!hostile || nc.id < hostile.id) hostile = nc;
+          continue;
+        }
+        if (!t || nc.id < t.id) t = nc;
+      }
+      t = t || hostile;
+    }
+    if (!t) return { ok: false, reason: "рядом нет чужого мирного города" };
+    if (atWar(u.owner, t.owner)) return { ok: false, reason: "мы воюем с владельцем города" };
+    const gold = MERCHANT_BASE + S.turn;
+    p.gold += gold;
+    addLog(`Великий ${GREAT_PEOPLE.merchant.name} заключает сделки в ${t.name}: +${gold}🪙`);
   } else if (def.gp === "general") {
     const troops = S.units.filter((o) => o.owner === u.owner && o !== u && !UNITS[o.type].gp && UNITS[o.type].atk > 0 && dist(u.x, u.y, o.x, o.y) <= 2);
     if (!troops.length) return { ok: false, reason: "рядом нет своих войск" };
@@ -1922,6 +1946,25 @@ function aiTurnOne(owner) {
             stepToward(u, tgt.x, tgt.y);
             if (u.x + "," + u.y === before) break;
           }
+        } else {
+          u.moves = 0;
+        }
+        continue;
+      }
+      if (UNITS[u.type].gp === "merchant") {
+        const tgt = S.cities.filter((c) => c.owner !== owner && playerAlive(c.owner) && !atWar(owner, c.owner))
+          .sort((a, b) => dist(u.x, u.y, a.x, a.y) - dist(u.x, u.y, b.x, b.y) || a.id - b.id)[0];
+        if (tgt) {
+          const onOwnTile = () => {
+            const oc = cityAt(u.x, u.y);
+            return !!oc && oc.owner === owner;
+          };
+          while (u.moves > 0 && (dist(u.x, u.y, tgt.x, tgt.y) > 1 || onOwnTile())) {
+            const before = u.x + "," + u.y;
+            stepToward(u, tgt.x, tgt.y);
+            if (u.x + "," + u.y === before) break;
+          }
+          if (dist(u.x, u.y, tgt.x, tgt.y) <= 1 && !onOwnTile()) useGreatPerson(u.id);
         } else {
           u.moves = 0;
         }

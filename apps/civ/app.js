@@ -324,7 +324,7 @@ function renderPanel() {
     if (u.gp) {
       const gpDef = GREAT_PEOPLE[u.gp];
       const inOwnCity = ownCity && ownCity.owner === cur;
-      const gpBlocked = u.gp !== "scientist" && u.gp !== "general" && !inOwnCity;
+      const gpBlocked = u.gp !== "scientist" && u.gp !== "general" && u.gp !== "merchant" && !inOwnCity;
       body += `<button class="btn primary" id="civ-gp" ${gpBlocked ? `disabled title="Великий человек должен быть в своём городе"` : `title="${gpDef.desc}"`}>✨ ${gpDef.desc}</button>`;
     }
     const upTo = u.upgrade ? UNITS[u.upgrade] : null;

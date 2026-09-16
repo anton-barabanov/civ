@@ -1721,7 +1721,7 @@ check("great people unit data", ["gp_scientist", "gp_engineer", "gp_artist", "gp
 }));
 check("GREAT_PEOPLE table exposed", !!api.GREAT_PEOPLE && ["scientist", "engineer", "artist", "prophet", "general"].every((k) =>
   api.GREAT_PEOPLE[k] && api.GREAT_PEOPLE[k].name && api.GREAT_PEOPLE[k].icon && api.GREAT_PEOPLE[k].desc) &&
-  JSON.stringify(api.GP_ORDER) === '["scientist","engineer","artist","prophet","general"]');
+  JSON.stringify(api.GP_ORDER) === '["scientist","engineer","artist","prophet","general","merchant"]');
 
 const gpAppSrc = readFileSync("apps/civ/app.js", "utf8");
 check("GP filtered from production list, action button in panel",
@@ -2501,11 +2501,11 @@ if (!fast) {
       gen2R.reason.includes("рядом нет") && api.S.units.includes(gen2));
   }
   api.S.units = [];
-  api.S.players[0].gpRotate = 4;
+  api.S.players[0].gpRotate = 5;
   api.S.players[0].gpPoints = api.S.players[0].gpNext;
   api.processEconomy();
-  check("gp rotation length 5 wraps to general",
-    api.S.units.some((u) => u.type === "gp_general") && api.S.players[0].gpRotate === 0);
+  check("gp rotation length 6 wraps to merchant",
+    api.S.units.some((u) => u.type === "gp_merchant") && api.S.players[0].gpRotate === 0);
 
   api.newGame(1, 3);
   api.foundCity(api.S.units.find((u) => u.owner === 0 && u.type === "settler"));
