@@ -25,8 +25,8 @@ const UNITS = {
   crossbowman: { name: "Арбалетчик", letter: "Ар", icon: "🎯", atk: 6, def: 5, moves: 1, cost: 55, tech: "machinery", upgrade: null },
   knight: { name: "Рыцарь", letter: "Р", icon: "🏇", atk: 8, def: 6, moves: 2, cost: 85, tech: "feudalism", res: ["iron", "horses"], upgrade: "cavalry" },
   musketman: { name: "Мушкетёр", letter: "Му", icon: "🔫", atk: 10, def: 8, moves: 1, cost: 100, tech: "gunpowder", upgrade: "rifleman" },
-  rifleman: { name: "Пехота", letter: "Пх", icon: "🪖", atk: 12, def: 10, moves: 1, cost: 120, tech: "electricity", res: ["iron"], upgrade: null },
-  cavalry: { name: "Кавалерия", letter: "Кв", icon: "🐎", atk: 14, def: 6, moves: 3, cost: 140, tech: "electricity", res: ["horses", "iron"], upgrade: null },
+  rifleman: { name: "Пехота", letter: "Пх", icon: "🪖", atk: 12, def: 10, moves: 1, cost: 120, tech: "electricity", res: ["iron"], upgrade: "motorized" },
+  cavalry: { name: "Кавалерия", letter: "Кв", icon: "🐎", atk: 14, def: 6, moves: 3, cost: 140, tech: "electricity", res: ["horses", "iron"], upgrade: "tank" },
   artillery: { name: "Артиллерия", letter: "Арт", icon: "💣", atk: 16, def: 4, moves: 1, cost: 150, tech: "chemistry", upgrade: null },
   zeppelin: { name: "Дирижабль", letter: "Др", icon: "🎈", atk: 0, def: 1, moves: 4, cost: 90, tech: "flight", air: true, recon: 3, upgrade: null },
   bomber: { name: "Бомбардировщик", letter: "Бм", icon: "✈️", atk: 8, def: 3, moves: 4, cost: 100, tech: "flight", air: true, upgrade: null },
@@ -37,6 +37,8 @@ const UNITS = {
   gp_general: { name: "Полководец", letter: "Пк", icon: "🎖️", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "general" },
   gp_merchant: { name: "Торговец", letter: "Тр", icon: "💰", atk: 0, def: 1, moves: 2, cost: 0, tech: null, upgrade: null, gp: "merchant" },
   spy: { name: "Шпион", letter: "Шп", icon: "🕵", atk: 0, def: 1, moves: 2, cost: 70, tech: "espionage", upgrade: null },
+  tank: { name: "Танк", letter: "Тн", icon: "🛡", atk: 20, def: 12, moves: 3, cost: 220, tech: "combustion", res: ["iron"], upgrade: null },
+  motorized: { name: "Мотопехота", letter: "Мп", icon: "🚚", atk: 18, def: 16, moves: 2, cost: 190, tech: "industrialism", res: ["iron"], upgrade: null },
 };
 
 const DIFFICULTIES = [
@@ -72,6 +74,8 @@ const BUILDINGS = {
   university: { name: "Университет", cost: 80, tech: "education", desc: "+3 науки, +1 культуры", effects: { sciFlat: 3, culture: 1 } },
   barracks: { name: "Казармы", cost: 45, tech: "iron", desc: "+1 атаки юнитам, созданным в городе", effects: { unitAtk: 1 } },
   aqueduct: { name: "Акведук", cost: 60, tech: "engineering", desc: "+3 к пределу населения", effects: { maxPop: 3 } },
+  factory: { name: "Фабрика", cost: 120, tech: "combustion", desc: "+3 производства", effects: { prodFlat: 3 } },
+  bank: { name: "Банк", cost: 90, tech: "banking", desc: "+3 золота", effects: { goldFlat: 3 } },
 };
 
 const WONDERS = {
@@ -85,6 +89,8 @@ const WONDERS = {
   artemis: { name: "Храм Артемиды", icon: "🦌", cost: 180, tech: "construction", desc: "+2 культуры во всех городах", effects: { culture: 2 } },
   terracotta: { name: "Терракотовая армия", icon: "🏺", cost: 200, tech: "bureaucracy", desc: "3 бесплатных мечника при завершении", effects: { freeUnits: { id: "swordsman", n: 3 } } },
   lighthouse: { name: "Маяк Александрийский", icon: "🗼", cost: 190, tech: "compass", desc: "+50% золотого дохода от морской торговли во всех городах", effects: { tradeMult: 1.5 } },
+  wallstreet: { name: "Уолл-стрит", icon: "💵", cost: 320, tech: "electricity", desc: "+50% золотого дохода от морской торговли во всех городах", effects: { tradeMult: 1.5 } },
+  hollywood: { name: "Голливуд", icon: "🎬", cost: 340, tech: "flight", desc: "+3 культуры во всех городах", effects: { culture: 3 } },
 };
 
 const SS_PARTS = {
@@ -126,6 +132,8 @@ const TECHS = {
   bureaucracy: { name: "Государственное управление", cost: 200, req: ["banking", "education"] },
   compass: { name: "Компас", cost: 150, req: ["astronomy"] },
   espionage: { name: "Разведка", cost: 130, req: ["banking"] },
+  combustion: { name: "Двигатель внутреннего сгорания", cost: 280, req: ["electricity"] },
+  industrialism: { name: "Индустриализация", cost: 340, req: ["combustion", "bureaucracy"] },
 };
 
 const RELIGIONS = {
@@ -1010,7 +1018,7 @@ function roadConnected(c1, c2, comp) {
 }
 
 function buildingEffects(c) {
-  const e = { foodFlat: 0, prodFlat: 0, sciFlat: 0, sciMult: 1, defMult: 1, tradeMult: 1, culture: 0, unitAtk: 0, maxPop: 0, happiness: 0 };
+  const e = { foodFlat: 0, prodFlat: 0, sciFlat: 0, sciMult: 1, defMult: 1, tradeMult: 1, culture: 0, unitAtk: 0, maxPop: 0, happiness: 0, goldFlat: 0 };
   for (const b of c.buildings) {
     const f = BUILDINGS[b] ? BUILDINGS[b].effects : null;
     if (!f) continue;
@@ -1024,6 +1032,7 @@ function buildingEffects(c) {
     e.unitAtk += f.unitAtk || 0;
     e.maxPop += f.maxPop || 0;
     e.happiness += f.happiness || 0;
+    e.goldFlat += f.goldFlat || 0;
   }
   return e;
 }
@@ -1206,7 +1215,8 @@ function cityYields(c) {
   const tradeGold = trade ? 2 * e.tradeMult * pe.tradeMult : land ? 1 : 0;
   const holyGold = (S.players[c.owner].stateReligion === c.religion && isHolyCity(c)) ? 2 : 0;
   const gold = 3 + Math.floor(c.pop / 2) + tradeGold + holyGold;
-  return { food, prod, sci, gold, trade: trade || land, tradeGold };
+  const goldTotal = gold + (e.goldFlat || 0);
+  return { food, prod, sci, gold: goldTotal, trade: trade || land, tradeGold };
 }
 
 function playerGoldPerTurn(i) {
@@ -1764,7 +1774,7 @@ function aiTurnOne(owner) {
     if (!c.producing) {
       const settlers = S.units.filter((u) => u.owner === owner && u.type === "settler").length;
       const myCities = S.cities.filter((x) => x.owner === owner).length;
-      const bestUnit = () => ["rifleman", "cavalry", "artillery", "bomber", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+      const bestUnit = () => ["tank", "motorized", "rifleman", "cavalry", "artillery", "bomber", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => unitAvailable(owner, t));
       const availWonders = Object.keys(WONDERS).filter((id) =>
         (!WONDERS[id].tech || p.techs.includes(WONDERS[id].tech)) &&
@@ -1794,7 +1804,7 @@ function aiTurnOne(owner) {
       } else if (flagship && c === flagship && Object.keys(SS_PARTS).some((id) => !(S.space[owner] || []).includes(id))) {
         c.producing = { k: "project", id: Object.keys(SS_PARTS).find((id) => !(S.space[owner] || []).includes(id)) };
       } else if (c.pop >= 3 && !c.buildings.includes("library") && Math.random() < 0.35) {
-        const avail = ["granary", "library", "temple", "amphitheater", "forge", "market"].filter(
+        const avail = ["granary", "library", "temple", "amphitheater", "forge", "market", "bank", "factory"].filter(
           (b) => !c.buildings.includes(b) && (!BUILDINGS[b].tech || p.techs.includes(BUILDINGS[b].tech))
         );
         c.producing = avail.length
@@ -1809,7 +1819,7 @@ function aiTurnOne(owner) {
   const fighting = S.players.some((_, i) => i !== owner && atWar(owner, i));
   if (own.length) {
     if (fighting) {
-      const combat = ["rifleman", "cavalry", "artillery", "bomber", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
+      const combat = ["tank", "motorized", "rifleman", "cavalry", "artillery", "bomber", "musketman", "knight", "catapult", "swordsman", "horseman", "archer", "warrior"]
         .find((t) => unitAvailable(owner, t));
       if (combat) {
         const price = Math.ceil(UNITS[combat].cost * 3);

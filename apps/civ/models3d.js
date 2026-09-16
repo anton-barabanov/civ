@@ -378,6 +378,40 @@ export function createUnitMesh(unitType, ownerColor = "#b8b8b8") {
     add(group, strutGeo, woodDark, 0, 0.32, 0.24);
     add(group, strutGeo, woodDark, 0, 0.32, -0.24);
     add(group, geo("u:bombProp", () => new THREE.BoxGeometry(0.012, 0.28, 0.03)), woodDark, 0.37, 0.3, 0).rotation.x = 0.5;
+  } else if (unitType === "tank") {
+    const trackMat = mat(C.coal);
+    const trackGeo = geo("u:tnTrack", () => new THREE.BoxGeometry(0.5, 0.09, 0.07));
+    add(group, trackGeo, trackMat, 0, 0.075, 0.135);
+    add(group, trackGeo, trackMat, 0, 0.075, -0.135);
+    add(group, geo("u:tnHull", () => new THREE.BoxGeometry(0.42, 0.11, 0.24)), om, 0, 0.16, 0);
+    add(group, geo("u:tnSlope", () => new THREE.BoxGeometry(0.16, 0.05, 0.22)), om, 0.17, 0.135, 0).rotation.z = -0.5;
+    add(group, geo("u:tnTurret", () => new THREE.CylinderGeometry(0.085, 0.1, 0.09, 8)), om, -0.02, 0.285, 0);
+    add(group, geo("u:tnBarrel", () => new THREE.BoxGeometry(0.38, 0.032, 0.032)), metal, 0.22, 0.29, 0);
+    add(group, geo("u:tnMuzzle", () => new THREE.BoxGeometry(0.06, 0.046, 0.046)), trackMat, 0.43, 0.29, 0);
+    add(group, geo("u:tnHatch", () => new THREE.CylinderGeometry(0.035, 0.035, 0.02, 7)), trackMat, -0.02, 0.34, 0);
+  } else if (unitType === "motorized") {
+    add(group, geo("u:motBody", () => new THREE.BoxGeometry(0.36, 0.11, 0.2)), om, -0.08, 0.125, 0);
+    add(group, geo("u:motCab", () => new THREE.BoxGeometry(0.14, 0.1, 0.18)), om, 0.19, 0.12, 0);
+    add(group, geo("u:motWind", () => new THREE.BoxGeometry(0.015, 0.07, 0.14)), mat(C.snow), 0.25, 0.15, 0);
+    const wheelGeo = geo("u:wheel", () => new THREE.CylinderGeometry(0.08, 0.08, 0.024, 9));
+    const tireMat = mat(C.coal);
+    add(group, wheelGeo, tireMat, 0.18, 0.08, 0.085).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, tireMat, 0.18, 0.08, -0.115).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, tireMat, -0.14, 0.08, 0.085).rotation.x = Math.PI / 2;
+    add(group, wheelGeo, tireMat, -0.14, 0.08, -0.115).rotation.x = Math.PI / 2;
+    const gunner1 = new THREE.Group();
+    gunner1.position.set(-0.16, 0.17, 0.045);
+    group.add(gunner1);
+    addFigure(gunner1, om, 0.062, 0.24, 0, 0);
+    add(gunner1, geo("u:motHelm", () => new THREE.SphereGeometry(0.08, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2)), metal, 0, 0.3, 0);
+    const gunner2 = new THREE.Group();
+    gunner2.position.set(-0.01, 0.17, -0.045);
+    group.add(gunner2);
+    addFigure(gunner2, om, 0.062, 0.24, 0, 0);
+    add(gunner2, geo("u:motHelm", () => new THREE.SphereGeometry(0.08, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2)), metal, 0, 0.3, 0);
+    const smg = add(gunner1, geo("u:motSmg", () => new THREE.BoxGeometry(0.34, 0.024, 0.024)), woodDark, 0.14, 0.2, 0.02);
+    add(smg, geo("u:motSmgTip", () => new THREE.BoxGeometry(0.1, 0.018, 0.018)), metal, 0.21, 0, 0);
+    add(smg, geo("u:motSmgMag", () => new THREE.BoxGeometry(0.05, 0.05, 0.016)), trackMat, 0.02, -0.03, 0);
   } else {
     addFigure(group, om, 0.09, 0.35, 0, 0);
   }

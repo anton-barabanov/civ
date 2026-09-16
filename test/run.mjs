@@ -958,10 +958,10 @@ api.foundCity(wS);
 api.foundCity(api.spawn("settler", 0, wS.x + 2 <= TW - 1 ? wS.x + 2 : wS.x - 2, wS.y));
 for (const c of api.S.cities) { c.pop = 1; c.culture = 0; c.foodStored = 0; c.prodStored = 0; c.buildings = []; c.producing = null; }
 const WT = api.WONDERS;
-check("WONDERS table valid", !!WT && Object.keys(WT).length === 10 &&
-  ["pyramids", "greatlibrary", "colossus", "greatwall", "oraclew", "worldcouncil", "gardens", "artemis", "terracotta", "lighthouse"].every((id) =>
+check("WONDERS table valid", !!WT && Object.keys(WT).length === 12 &&
+  ["pyramids", "greatlibrary", "colossus", "greatwall", "oraclew", "worldcouncil", "gardens", "artemis", "terracotta", "lighthouse", "wallstreet", "hollywood"].every((id) =>
     WT[id] && WT[id].name && WT[id].icon && WT[id].desc && api.TECHS[WT[id].tech]) &&
-  Object.values(WT).every((w) => w.cost >= 130 && w.cost <= 200 && w.effects));
+  Object.values(WT).every((w) => w.cost >= 130 && w.cost <= 350 && w.effects));
 
 const wA = api.S.cities[0], wB = api.S.cities[1];
 api.S.players[0].techs.push("masonry");
@@ -1590,8 +1590,8 @@ if (!upCoast) {
     UT.archer.upgrade === "crossbowman" && UT.spearman.upgrade === "musketman" &&
     UT.horseman.upgrade === "knight" && UT.galley.upgrade === "caravel" &&
     UT.settler.upgrade === null && UT.scout.upgrade === null && UT.catapult.upgrade === "artillery" &&
-    UT.crossbowman.upgrade === null && UT.knight.upgrade === "cavalry" && UT.musketman.upgrade === "rifleman" &&
-    UT.caravel.upgrade === null && UT.rifleman.upgrade === null && UT.cavalry.upgrade === null &&
+    UT.crossbowman.upgrade === null && UT.knight.upgrade === "cavalry" && UT.musketman.upgrade === "rifleman" && UT.cavalry.upgrade === "tank" && UT.rifleman.upgrade === "motorized" &&
+    UT.caravel.upgrade === null && UT.tank.upgrade === null && UT.motorized.upgrade === null &&
     UT.artillery.upgrade === null);
   let upCyc = false;
   for (const id in UT) {
@@ -2435,10 +2435,10 @@ if (!fast) {
   const nuCity = api.S.cities[0];
   check("late game units table data", UT.rifleman.name === "Пехота" && UT.rifleman.icon === "🪖" &&
     UT.rifleman.atk === 12 && UT.rifleman.def === 10 && UT.rifleman.moves === 1 && UT.rifleman.cost === 120 &&
-    UT.rifleman.tech === "electricity" && JSON.stringify(UT.rifleman.res) === '["iron"]' && UT.rifleman.upgrade === null &&
+    UT.rifleman.tech === "electricity" && JSON.stringify(UT.rifleman.res) === '["iron"]' && UT.rifleman.upgrade === "motorized" &&
     UT.cavalry.name === "Кавалерия" && UT.cavalry.atk === 14 && UT.cavalry.def === 6 && UT.cavalry.moves === 3 &&
     UT.cavalry.cost === 140 && UT.cavalry.tech === "electricity" &&
-    JSON.stringify(UT.cavalry.res) === '["horses","iron"]' && UT.cavalry.upgrade === null &&
+    JSON.stringify(UT.cavalry.res) === '["horses","iron"]' && UT.cavalry.upgrade === "tank" &&
     UT.artillery.name === "Артиллерия" && UT.artillery.atk === 16 && UT.artillery.def === 4 &&
     UT.artillery.moves === 1 && UT.artillery.cost === 150 && UT.artillery.tech === "chemistry" &&
     !UT.artillery.res && UT.artillery.upgrade === null);
@@ -2896,7 +2896,7 @@ check("sprint 7 wonders effects declared",
   api.WONDERS.terracotta.effects.freeUnits.id === "swordsman" &&
   api.WONDERS.terracotta.effects.freeUnits.n === 3 &&
   api.WONDERS.lighthouse.effects.tradeMult === 1.5 &&
-  ["gardens", "artemis", "terracotta", "lighthouse"].every((id) => api.TECHS[api.WONDERS[id].tech]));
+  ["gardens", "artemis", "terracotta", "lighthouse", "wallstreet", "hollywood"].every((id) => api.TECHS[api.WONDERS[id].tech]));
 
 api.newGame(1);
 api.S.units = [];
