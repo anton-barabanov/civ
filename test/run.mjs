@@ -33,7 +33,7 @@ execSync("rm -rf /tmp/civmod && mkdir -p /tmp/civmod");
 execSync("cp apps/civ/*.js /tmp/civmod/");
 writeFileSync("/tmp/civmod/package.json", '{"type":"module"}');
 
-const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
+const mutation = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"].includes(process.env.CIV_MUTATION) ? process.env.CIV_MUTATION : null;
 const fast = !!process.env.CIV_FAST;
 const MUT_TARGETS = {
   a: ["foodFlat: 2", "foodFlat: 0"],
@@ -54,6 +54,8 @@ const MUT_TARGETS = {
   p: ["if (isAlly(k, j)) declareWar(k, i, true);", "if (isAlly(k, j)) declareWar(k, i);"],
   q: ["  const comps = comp || roadNetworkComponents();", "  return false;\n  const comps = comp || roadNetworkComponents();"],
   r: ["const CULTURE_WIN_THRESHOLD = 400;", "const CULTURE_WIN_THRESHOLD = 9;"],
+  s: ["function aiNavyPlan(owner) {\n  const p = S.players[owner];", "function aiNavyPlan(owner) {\n  return null;\n  const p = S.players[owner];"],
+  t: ["  const upkeep = cities.filter((c) => !(!!c.colony && S.turn - c.colony <= 10)).length * 2 +", "  const upkeep = cities.filter(() => true).length * 2 +"],
 };
 if (mutation) {
   const src = readFileSync("/tmp/civmod/core.js", "utf8");
@@ -3276,6 +3278,116 @@ const migSpot2 = api.S.units.find((u) => u.owner === 2);
 for (let i = 0; i < 3; i++) api.spawn("catapult", 2, migSpot2.x, migSpot2.y);
 check("proposeAlliance works after ally migration", api.proposeAlliance(1, 2).ok === true && api.isAlly(1, 2));
 
+const twoContMap = (opt) => {
+  for (let i = 0; i < TW * TH; i++) {
+    const x = i % TW, y = (i / TW) | 0;
+    let land = opt.small ? (x <= 4 && y <= 6) || x >= 32 : x < 13 || x > 22;
+    if (opt.lake && x >= 27 && x <= 28 && y >= 10 && y <= 11) land = false;
+    api.S.map[i] = land ? 1 : 0;
+    api.S.res[i] = null;
+  }
+  const wcomps = allComps(api.S.map, (t) => t === 0);
+  api.S.waterComp = new Array(TW * TH).fill(-1);
+  wcomps.forEach((c, i) => c.cells.forEach((k) => { api.S.waterComp[k] = i; }));
+  api.S.units = [];
+  api.S.cities = [];
+  api.S.camps = [];
+  api.S.impr = new Array(TW * TH).fill(null);
+  api.S.tileOwner = new Array(TW * TH).fill(-1);
+  api.recomputeBorders();
+};
+
+api.newGame(1);
+twoContMap({});
+api.S.players[0].techs.push("sailing");
+api.foundCity(api.spawn("settler", 0, 12, 5));
+api.spawn("catapult", 0, 12, 5);
+api.spawn("catapult", 0, 12, 5);
+api.foundCity(api.spawn("settler", 1, 23, 5));
+api.declareWar(0, 1);
+const warPlan = api.aiNavyPlan(0);
+check("navy war plan targets enemy across the sea", !!warPlan && warPlan.mode === "war" &&
+  warPlan.goal[0] === 23 && warPlan.goal[1] === 5 &&
+  !!warPlan.landing && api.S.map[warPlan.landing[1] * TW + warPlan.landing[0]] === 0 &&
+  api.waterCompOf(warPlan.landing[0], warPlan.landing[1]) === api.waterCompOf(warPlan.rally[0], warPlan.rally[1]));
+
+api.newGame(2);
+twoContMap({ small: true });
+api.S.players[0].techs.push("sailing");
+for (const [cx, cy] of [[2, 2], [2, 5], [4, 3]]) api.foundCity(api.spawn("settler", 0, cx, cy));
+const colPlan = api.aiNavyPlan(0);
+check("navy colony plan when home continent full", !!colPlan && colPlan.mode === "colony" &&
+  colPlan.goal[0] >= 32 && !api.landCompOf(2, 2).has(colPlan.goal[1] * TW + colPlan.goal[0]) &&
+  !!colPlan.landing && api.S.map[colPlan.landing[1] * TW + colPlan.landing[0]] === 0 &&
+  api.waterCompOf(colPlan.landing[0], colPlan.landing[1]) === api.waterCompOf(colPlan.rally[0], colPlan.rally[1]));
+
+api.newGame(1);
+twoContMap({ lake: true });
+api.S.players[0].techs.push("sailing");
+api.foundCity(api.spawn("settler", 0, 12, 5));
+api.spawn("catapult", 0, 12, 5);
+api.spawn("catapult", 0, 12, 5);
+api.foundCity(api.spawn("settler", 1, 27, 9));
+api.declareWar(0, 1);
+check("navy plan null for lake-only target", api.aiNavyPlan(0) === null);
+
+api.newGame(1);
+twoContMap({});
+api.foundCity(api.spawn("settler", 0, 2, 2));
+api.foundCity(api.spawn("settler", 0, 25, 5));
+const colCity = api.S.cities.find((c) => c.x === 25 && c.y === 5);
+check("colony flagged on foreign land component", api.S.cities[0].colony === false &&
+  colCity.colony === api.S.turn);
+check("colony gets free defender", api.S.units.some((u) => u.owner === 0 && u.type === "warrior" && u.x === 25 && u.y === 5) &&
+  api.S.units.filter((u) => u.owner === 0).length === 1);
+api.S.units = [];
+const colTurn = colCity.colony;
+const colG1 = api.playerGoldPerTurn(0);
+api.S.turn = colTurn + 10;
+const colG2 = api.playerGoldPerTurn(0);
+api.S.turn = colTurn + 11;
+const colG3 = api.playerGoldPerTurn(0);
+check("colony upkeep holiday 2 gold for 10 turns", colG1.upkeep === 2 && colG2.upkeep === 2);
+check("colony upkeep resumes on turn 11", colG3.upkeep === 4);
+api.save();
+const rawCol = JSON.parse(store["civ2_save"]);
+rawCol.cities.forEach((c) => { delete c.colony; });
+store["civ2_save"] = JSON.stringify(rawCol);
+check("old save without colony flag migrates false", api.load() === true &&
+  api.S.cities.every((c) => c.colony === false));
+api.S.cities.find((c) => c.x === 25).colony = 7;
+api.save();
+check("colony flag roundtrips through save", api.load() === true &&
+  api.S.cities.find((c) => c.x === 25).colony === 7);
+
+api.newGame(1);
+twoContMap({});
+api.foundCity(api.spawn("settler", 0, 2, 2));
+api.foundCity(api.spawn("settler", 1, 25, 5));
+const merchOwn = api.spawn("gp_merchant", 0, 2, 2);
+const merchOwnR = api.useGreatPerson(merchOwn.id);
+check("merchant refused in own city", merchOwnR.ok === false && merchOwnR.reason.includes("чужом городе") &&
+  api.S.units.includes(merchOwn));
+api.S.turn = 40;
+api.S.players[0].gold = 50;
+const merchFor = api.spawn("gp_merchant", 0, 25, 5);
+const merchForR = api.useGreatPerson(merchFor.id);
+check("merchant mission in foreign peaceful city", merchForR.ok === true &&
+  api.S.players[0].gold === 50 + 100 + 40 && !api.S.units.includes(merchFor) &&
+  api.S.log.some((l) => l.includes("заключает сделки")));
+
+api.newGame(1, 2);
+twoContMap({});
+api.foundCity(api.spawn("settler", 2, 25, 10));
+const acTarget = api.S.cities[0];
+api.declareWar(0, 2);
+api.declareWar(1, 2);
+for (const [ax, ay] of [[25, 9], [25, 11], [24, 10]]) api.spawn("catapult", 1, ax, ay);
+check("ally cluster map empty without alliance", api.aiAllyClusterMap(0).size === 0);
+api.S.relations["0:1"].ally = true;
+const acMap = api.aiAllyClusterMap(0);
+check("ally cluster map caps power at 9", acMap.size === 1 && acMap.get(acTarget.id) === 9);
+
 if (!mutation) {
   const expectFail = {    a: "FAIL granary +2 food",
     b: "FAIL processEconomy updates borders after growth",
@@ -3295,8 +3407,10 @@ if (!mutation) {
     p: "FAIL alliance war cascade stops at depth 1",
     q: "FAIL roadConnected via road chain",
     r: "FAIL culture win constants exposed",
+    s: "FAIL navy war plan targets enemy across the sea",
+    t: "FAIL colony upkeep holiday 2 gold for 10 turns",
   };
-  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r"]) {
+  for (const m of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"]) {
     let r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
     if (r.status === null || r.error) {
       r = spawnSync("node", ["test/run.mjs"], { encoding: "utf8", env: { ...process.env, CIV_MUTATION: m, CIV_FAST: "1" } });
@@ -3305,7 +3419,7 @@ if (!mutation) {
   }
 }
 
-check("suite within time budget", Date.now() - t0 < 90000);
+check("suite within time budget", Date.now() - t0 < 120000);
 
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
